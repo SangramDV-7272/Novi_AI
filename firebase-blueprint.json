@@ -1,0 +1,33 @@
+{
+  "entities": {
+    "User": {
+      "path": "users/{userId}",
+      "description": "Stores user profile settings and preferences",
+      "fields": {
+        "uid": { "type": "string", "description": "The user UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "User avatar photo URL" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of account creation" },
+        "lastLoginAt": { "type": "string", "description": "ISO timestamp of last sign in" }
+      }
+    },
+    "JournalEntry": {
+      "path": "users/{userId}/entries/{entryId}",
+      "description": "User journal entry with multi-turn AI reflections, summary, key insights, and tags",
+      "fields": {
+        "id": { "type": "string", "description": "Unique entry identifier" },
+        "userId": { "type": "string", "description": "Owner user ID" },
+        "title": { "type": "string", "description": "Title or topic of the journal reflection" },
+        "category": { "type": "string", "description": "Category (e.g. Daily Reflection, Career, Mindset, Creative, Gratitude)" },
+        "mood": { "type": "string", "description": "Optional mood indicator (e.g. calm, motivated, thoughtful, stressed, happy)" },
+        "initialText": { "type": "string", "description": "Original journal prompt or reflection text from user" },
+        "summary": { "type": "string", "description": "AI generated concise summary of reflection" },
+        "keyInsights": { "type": "array", "description": "AI identified key takeaways / action items" },
+        "messages": { "type": "array", "description": "Multi-turn conversation turns [{role, content, timestamp}]" },
+        "createdAt": { "type": "string", "description": "ISO timestamp when entry was started" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of latest update" }
+      }
+    }
+  }
+}
