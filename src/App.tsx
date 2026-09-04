@@ -26,7 +26,7 @@ import {
   saveJournalEntry,
   deleteEntryFromFirestore,
 } from './lib/firebase';
-import type { UserProfile, JournalEntry } from './types';
+import type { UserProfile, JournalEntry, MediaAttachment } from './types';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -143,10 +143,10 @@ export default function App() {
   };
 
   // Delete handler
-  const handleDeleteEntry = async (entryId: string) => {
+  const handleDeleteEntry = async (entryId: string, attachments?: MediaAttachment[]) => {
     if (!user?.uid) return;
     try {
-      await deleteEntryFromFirestore(user.uid, entryId);
+      await deleteEntryFromFirestore(user.uid, entryId, attachments);
       setEntries((prev) => prev.filter((e) => e.id !== entryId));
       if (chattingEntry?.id === entryId) setChattingEntry(null);
       if (viewingDetailEntry?.id === entryId) setViewingDetailEntry(null);

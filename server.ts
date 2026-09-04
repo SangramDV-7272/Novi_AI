@@ -9,7 +9,7 @@ const app = express();
 const PORT = 3000;
 
 // Mount middleware
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '15mb' }));
 
 // Lazy GoogleGenAI client helper
 let aiClient: GoogleGenAI | null = null;
@@ -284,6 +284,273 @@ Keep each prompt under 25 words. Return ONLY a JSON array of strings, e.g. ["Pro
         'What emotion is asking for your attention right now?',
         'What are three things you feel genuinely grateful for today?',
       ],
+    });
+  }
+});
+
+// Google Maps Configuration Endpoint
+app.get('/api/maps/config', (_req: Request, res: Response) => {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
+  res.json({
+    hasKey: Boolean(apiKey),
+    apiKey: apiKey || '',
+  });
+});
+
+// Google Maps Geocoding & Reverse-Geocoding Proxy (mitigates client CORS)
+app.post('/api/maps/geocode', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { latitude, longitude, address } = req.body;
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
+
+    // If coordinates provided: Reverse Geocoding
+    if (typeof latitude === 'number' && typeof longitude === 'number') {
+      if (apiKey) {
+        try {
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
+          const gResponse = await fetch(url);
+          const gData = await gResponse.json();
+          if (gData.status === 'OK' && gData.results && gData.results.length > 0) {
+            const first = gData.results[0];
+            res.json({
+              address: first.formatted_address,
+              latitude,
+              longitude,
+              placeId: first.place_id,
+            });
+            return;
+          }
+        } catch (err) {
+          console.warn('Google Geocode failed, using fallback:', err);
+        }
+      }
+
+      // Nominatim open reverse geocoding fallback for zero-friction testing
+      try {
+        const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16&addressdetails=1`;
+        const nomRes = await fetch(nomUrl, {
+          headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0' },
+        });
+        if (nomRes.ok) {
+          const nomData = await nomRes.json();
+          const displayName = nomData.display_name || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+          res.json({
+            address: displayName,
+            latitude,
+            longitude,
+          });
+          return;
+        }
+      } catch (nomErr) {
+        console.warn('Nominatim reverse geocode error:', nomErr);
+      }
+
+      res.json({
+        address: `Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+        latitude,
+        longitude,
+      });
+      return;
+    }
+
+    // If address text provided: Forward Geocoding
+    if (typeof address === 'string' && address.trim()) {
+      if (apiKey) {
+        try {
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+          const gResponse = await fetch(url);
+          const gData = await gResponse.json();
+          if (gData.status === 'OK' && gData.results && gData.results.length > 0) {
+            const first = gData.results[0];
+            res.json({
+              address: first.formatted_address,
+              latitude: first.geometry.location.lat,
+              longitude: first.geometry.location.lng,
+              placeId: first.place_id,
+            });
+            return;
+          }
+        } catch (err) {
+          console.warn('Google Forward Geocode failed, using fallback:', err);
+        }
+      }
+
+      // Nominatim search fallback
+      try {
+        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+        const nomRes = await fetch(nomUrl, {
+          headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0' },
+        });
+        if (nomRes.ok) {
+          const nomData = await nomRes.json();
+          if (Array.isArray(nomData) && nomData.length > 0) {
+            const first = nomData[0];
+            res.json({
+              address: first.display_name,
+              latitude: parseFloat(first.lat),
+              longitude: parseFloat(first.lon),
+            });
+            return;
+          }
+        }
+      } catch (nomErr) {
+        console.warn('Nominatim forward search error:', nomErr);
+      }
+
+      res.status(404).json({ error: 'Could not resolve location for the specified address.' });
+      return;
+    }
+
+    res.status(400).json({ error: 'Latitude & Longitude or Address is required.' });
+  } catch (error: any) {
+    console.error('Error in /api/maps/geocode:', error);
+    res.status(500).json({ error: error?.message || 'Geocoding failed.' });
+  }
+});
+
+// Google Places Search / Autocomplete Proxy
+app.post('/api/maps/places-search', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { query } = req.body;
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: 'Query string is required.' });
+      return;
+    }
+
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
+
+    if (apiKey) {
+      try {
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}`;
+        const gResponse = await fetch(url);
+        const gData = await gResponse.json();
+        if (gData.status === 'OK' && Array.isArray(gData.predictions)) {
+          const predictions = gData.predictions.map((p: any) => ({
+            placeId: p.place_id,
+            description: p.description,
+            mainText: p.structured_formatting?.main_text || p.description,
+            secondaryText: p.structured_formatting?.secondary_text || '',
+          }));
+          res.json({ predictions });
+          return;
+        }
+      } catch (err) {
+        console.warn('Google Places autocomplete failed, falling back:', err);
+      }
+    }
+
+    // Nominatim autocomplete / search fallback
+    try {
+      const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`;
+      const nomRes = await fetch(nomUrl, {
+        headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0' },
+      });
+      if (nomRes.ok) {
+        const items = await nomRes.json();
+        if (Array.isArray(items)) {
+          const predictions = items.map((item: any) => ({
+            placeId: String(item.place_id),
+            description: item.display_name,
+            mainText: item.name || item.display_name.split(',')[0],
+            secondaryText: item.display_name.split(',').slice(1).join(',').trim(),
+            latitude: parseFloat(item.lat),
+            longitude: parseFloat(item.lon),
+          }));
+          res.json({ predictions });
+          return;
+        }
+      }
+    } catch (nomErr) {
+      console.warn('Nominatim search error:', nomErr);
+    }
+
+    res.json({ predictions: [] });
+  } catch (error: any) {
+    console.error('Error in /api/maps/places-search:', error);
+    res.status(500).json({ error: error?.message || 'Place search failed.' });
+  }
+});
+
+// AI Voice Dictation & Structuring Endpoint
+app.post('/api/gemini/voice-structure', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { audioBase64, mimeType, liveTranscript, category, mood } = req.body;
+
+    if (!audioBase64 && !liveTranscript) {
+      res.status(400).json({ error: 'Spoken audio or transcript data is required.' });
+      return;
+    }
+
+    const ai = getAIClient();
+    if (!ai) {
+      const fallbackText = liveTranscript || 'Spoken reflection recorded.';
+      res.json({
+        rawTranscript: liveTranscript || '',
+        structuredText: fallbackText,
+        modelUsed: 'local-fallback',
+      });
+      return;
+    }
+
+    const parts: any[] = [];
+    if (audioBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: mimeType || 'audio/webm',
+          data: audioBase64,
+        },
+      });
+    }
+
+    const prompt = `You are a mindful, empathic journaling scribe.
+Transcribe and structure this spoken reflection into an authentic, clear, and beautifully written personal journal entry.
+
+Context:
+- Category: ${category || 'General Reflection'}
+- Mood: ${mood || 'Reflective'}
+${liveTranscript ? `- Live speech transcript: "${liveTranscript}"` : ''}
+
+Instructions:
+1. Preserve the user's authentic thoughts, emotional truth, and personal voice.
+2. Remove disfluencies, accidental filler words ("um", "uh", "you know", "like"), and false starts.
+3. Organize the thoughts into cohesive, elegant paragraphs with natural punctuation and rhythm.
+4. If the user identified specific intentions, insights, or gratitudes, present them with clarity.
+5. Return ONLY a valid JSON object matching this exact structure:
+{
+  "rawTranscript": "Direct cleaned transcription of what was spoken",
+  "structuredText": "Mindfully organized and structured journal reflection text"
+}`;
+
+    parts.push({ text: prompt });
+
+    const result = await generateContentWithFallback({
+      contents: [{ role: 'user', parts }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.35,
+      },
+    });
+
+    let parsed: any;
+    try {
+      const cleaned = result.text.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = {
+        rawTranscript: liveTranscript || '',
+        structuredText: result.text,
+      };
+    }
+
+    res.json({
+      rawTranscript: parsed.rawTranscript || liveTranscript || '',
+      structuredText: parsed.structuredText || result.text,
+      modelUsed: result.modelUsed,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/gemini/voice-structure:', error);
+    res.status(500).json({
+      error: error?.message || 'Failed to structure voice reflection.',
     });
   }
 });

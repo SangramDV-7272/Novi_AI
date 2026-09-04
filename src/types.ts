@@ -28,6 +28,26 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface LocationTag {
+  latitude: number;
+  longitude: number;
+  address: string;
+  placeName?: string;
+  placeId?: string;
+  staticMapUrl?: string;
+}
+
+export interface MediaAttachment {
+  id: string;
+  name: string;
+  type: 'image' | 'video' | 'pdf';
+  mimeType: string;
+  url: string;
+  storagePath?: string;
+  size: number;
+  createdAt: string;
+}
+
 export interface JournalEntry {
   id: string;
   userId: string;
@@ -35,11 +55,20 @@ export interface JournalEntry {
   category: ReflectionCategory;
   mood: MoodType;
   initialText: string;
+  bodyFormat?: 'plain' | 'markdown';
+  location?: LocationTag | null;
+  attachments?: MediaAttachment[];
   summary?: string;
   keyInsights?: string[];
   messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface VoiceTranscriptionResult {
+  rawTranscript?: string;
+  structuredText: string;
+  modelUsed: string;
 }
 
 export interface GeminiChatResponse {

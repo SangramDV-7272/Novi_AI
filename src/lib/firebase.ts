@@ -19,7 +19,15 @@ import {
   orderBy,
   Firestore,
 } from 'firebase/firestore';
-import type { JournalEntry } from '../types';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject,
+  FirebaseStorage,
+} from 'firebase/storage';
+import type { JournalEntry, MediaAttachment } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
@@ -31,6 +39,9 @@ export const auth = getAuth(app);
 export const db: Firestore = (firebaseConfig as any).firestoreDatabaseId
   ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
   : getFirestore(app);
+
+// Initialize Firebase Storage
+export const storage: FirebaseStorage = getStorage(app);
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
@@ -87,6 +98,124 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
   return onAuthStateChanged(auth, callback);
 };
 
+// Helper to read file as base64 data URL
+export const readFileAsDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+};
+
+// Upload media attachment to Firebase Storage with automatic data-URL fallback
+export const uploadAttachmentFile = async (
+  userId: string,
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<MediaAttachment> => {
+  const attachmentId = 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `users/${userId}/attachments/${attachmentId}_${safeName}`;
+
+  let type: 'image' | 'video' | 'pdf' = 'image';
+  if (file.type.startsWith('video/')) {
+    type = 'video';
+  } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    type = 'pdf';
+  }
+
+  try {
+    const sRef = storageRef(storage, storagePath);
+    const uploadTask = uploadBytesResumable(sRef, file, {
+      contentType: file.type || undefined,
+    });
+
+    return await new Promise<MediaAttachment>((resolve, reject) => {
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          if (snapshot.totalBytes > 0 && onProgress) {
+            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+            onProgress(pct);
+          }
+        },
+        async (error) => {
+          console.warn('Firebase Storage upload failed, falling back to data URL:', error);
+          try {
+            const dataUrl = await readFileAsDataUrl(file);
+            if (onProgress) onProgress(100);
+            resolve({
+              id: attachmentId,
+              name: file.name,
+              type,
+              mimeType: file.type || 'application/octet-stream',
+              url: dataUrl,
+              size: file.size,
+              createdAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            reject(err);
+          }
+        },
+        async () => {
+          try {
+            const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+            if (onProgress) onProgress(100);
+            resolve({
+              id: attachmentId,
+              name: file.name,
+              type,
+              mimeType: file.type || 'application/octet-stream',
+              url: downloadUrl,
+              storagePath,
+              size: file.size,
+              createdAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            const dataUrl = await readFileAsDataUrl(file);
+            if (onProgress) onProgress(100);
+            resolve({
+              id: attachmentId,
+              name: file.name,
+              type,
+              mimeType: file.type || 'application/octet-stream',
+              url: dataUrl,
+              size: file.size,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+      );
+    });
+  } catch (err) {
+    console.warn('Direct storage ref creation failed, using data URL fallback:', err);
+    const dataUrl = await readFileAsDataUrl(file);
+    if (onProgress) onProgress(100);
+    return {
+      id: attachmentId,
+      name: file.name,
+      type,
+      mimeType: file.type || 'application/octet-stream',
+      url: dataUrl,
+      size: file.size,
+      createdAt: new Date().toISOString(),
+    };
+  }
+};
+
+// Delete attachment from Firebase Storage (no orphaned files)
+export const deleteAttachmentFile = async (attachment: MediaAttachment): Promise<void> => {
+  if (attachment.storagePath) {
+    try {
+      const sRef = storageRef(storage, attachment.storagePath);
+      await deleteObject(sRef);
+    } catch (error) {
+      console.warn('Attachment file already removed or inaccessible from storage:', error);
+    }
+  }
+};
+
 // Clean helper to strip undefined values before Firestore writes
 function sanitizePayload<T extends Record<string, any>>(obj: T): Partial<T> {
   const clean: Record<string, any> = {};
@@ -117,6 +246,26 @@ export const saveJournalEntry = async (
   await setDoc(entryRef, cleanData, { merge: true });
 };
 
+const mapDocToEntry = (docSnap: any, defaultUserId: string): JournalEntry => {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    userId: data.userId || defaultUserId,
+    title: data.title || 'Untitled Reflection',
+    category: data.category || 'Daily Reflection',
+    mood: data.mood || 'thoughtful',
+    initialText: data.initialText || '',
+    bodyFormat: data.bodyFormat === 'markdown' ? 'markdown' : 'plain',
+    location: data.location || null,
+    attachments: Array.isArray(data.attachments) ? data.attachments : [],
+    summary: data.summary || '',
+    keyInsights: Array.isArray(data.keyInsights) ? data.keyInsights : [],
+    messages: Array.isArray(data.messages) ? data.messages : [],
+    createdAt: data.createdAt || new Date().toISOString(),
+    updatedAt: data.updatedAt || new Date().toISOString(),
+  };
+};
+
 // Fetch user journal entries sorted by creation date descending
 export const fetchUserEntries = async (userId: string): Promise<JournalEntry[]> => {
   if (!userId) return [];
@@ -126,20 +275,7 @@ export const fetchUserEntries = async (userId: string): Promise<JournalEntry[]> 
     const snapshot = await getDocs(q);
     const entries: JournalEntry[] = [];
     snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      entries.push({
-        id: docSnap.id,
-        userId: data.userId || userId,
-        title: data.title || 'Untitled Reflection',
-        category: data.category || 'Daily Reflection',
-        mood: data.mood || 'thoughtful',
-        initialText: data.initialText || '',
-        summary: data.summary || '',
-        keyInsights: data.keyInsights || [],
-        messages: data.messages || [],
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
-      });
+      entries.push(mapDocToEntry(docSnap, userId));
     });
     return entries;
   } catch (error) {
@@ -150,20 +286,7 @@ export const fetchUserEntries = async (userId: string): Promise<JournalEntry[]> 
       const snapshot = await getDocs(entriesRef);
       const entries: JournalEntry[] = [];
       snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        entries.push({
-          id: docSnap.id,
-          userId: data.userId || userId,
-          title: data.title || 'Untitled Reflection',
-          category: data.category || 'Daily Reflection',
-          mood: data.mood || 'thoughtful',
-          initialText: data.initialText || '',
-          summary: data.summary || '',
-          keyInsights: data.keyInsights || [],
-          messages: data.messages || [],
-          createdAt: data.createdAt || new Date().toISOString(),
-          updatedAt: data.updatedAt || new Date().toISOString(),
-        });
+        entries.push(mapDocToEntry(docSnap, userId));
       });
       return entries.sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -175,12 +298,19 @@ export const fetchUserEntries = async (userId: string): Promise<JournalEntry[]> 
   }
 };
 
-// Delete a journal entry
+// Delete a journal entry and its storage attachments
 export const deleteEntryFromFirestore = async (
   userId: string,
-  entryId: string
+  entryId: string,
+  attachments?: MediaAttachment[]
 ): Promise<void> => {
   if (!userId || !entryId) return;
+  // Remove associated attachments from storage so no orphaned files exist
+  if (attachments && attachments.length > 0) {
+    for (const att of attachments) {
+      await deleteAttachmentFile(att).catch(() => {});
+    }
+  }
   const entryRef = doc(db, 'users', userId, 'entries', entryId);
   await deleteDoc(entryRef);
 };

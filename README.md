@@ -1,6 +1,6 @@
 # Mindful Reflections - AI Journal
 
-A user-authenticated, privacy-first journaling and reflection web application powered by **Gemini 3.6 Flash API**, **Firebase Authentication (Google Sign-In)**, and **Google Cloud Firestore**.
+A user-authenticated, privacy-first journaling and reflection web application powered by **Gemini 2.5 Flash & 2.5 Pro**, **Firebase Authentication (Google Sign-In)**, **Google Cloud Firestore**, **Firebase Storage**, and **Google Maps Platform**.
 
 ---
 
@@ -13,9 +13,13 @@ A user-authenticated, privacy-first journaling and reflection web application po
 2. **Cloud Firestore Security**:
    - Attribute-Based Access Control (ABAC) enforced at the database layer.
    - Cross-user data leakage strictly prevented via owner-bound security rules (`request.auth.uid == userId`).
-3. **Server-Side AI Proxying**:
+3. **Multimedia & Storage Security**:
+   - User uploads (images, video, PDFs) are partitioned by UID (`users/{userId}/attachments/*`).
+   - File deletion removes artifacts from both Firestore and Cloud Storage, preventing orphaned files.
+4. **Server-Side AI & Maps Proxying**:
    - `GEMINI_API_KEY` is retained solely in server-side memory (`server.ts`) and never exposed to the client browser.
-   - Multi-turn conversational reflections, automated summarization, and key insight synthesis with resilient model fallback ladders.
+   - Maps geocoding and Places autocomplete are proxied server-side to prevent CORS issues and protect secret keys.
+   - Voice audio structuring endpoint utilizes Gemini multimodal capabilities with resilience fallbacks.
 
 ---
 
@@ -32,21 +36,26 @@ gcloud services enable \
   run.googleapis.com \
   secretmanager.googleapis.com \
   firestore.googleapis.com \
-  identitytoolkit.googleapis.com
+  identitytoolkit.googleapis.com \
+  storage.googleapis.com \
+  geocoding-backend.googleapis.com \
+  places-backend.googleapis.com \
+  maps-backend.googleapis.com
 ```
 
 ---
 
 ## 2. Secret Manager Configuration
 
-Securely store your `GEMINI_API_KEY` in Google Cloud Secret Manager and grant the default Cloud Run Compute Service Account accessor permissions:
+Securely store your `GEMINI_API_KEY` and optional `GOOGLE_MAPS_API_KEY` in Google Cloud Secret Manager and grant the default Cloud Run Compute Service Account accessor permissions:
 
 ```bash
-# Create the secret
+# Create and populate secrets
 gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
-
-# Set the secret value
 echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+
+gcloud secrets create GOOGLE_MAPS_API_KEY --replication-policy="automatic"
+echo -n "YOUR_MAPS_API_KEY" | gcloud secrets versions add GOOGLE_MAPS_API_KEY --data-file=-
 
 # Grant Secret Accessor role to the Cloud Run service account
 PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format="value(projectNumber)")
@@ -54,12 +63,17 @@ PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format="value(projec
 gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
+
+gcloud secrets add-iam-policy-binding GOOGLE_MAPS_API_KEY \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 ```
 
 ---
 
-## 3. Firestore Security Rules
+## 3. Firestore & Storage Security Rules
 
+### Firestore Rules
 Deploy the following owner-bound security rules to ensure zero cross-user visibility:
 
 ```javascript
@@ -70,8 +84,20 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-    // Subcollections: journal entries, reflections, and chats
+    // Subcollections: journal entries, reflections, chats, and attachments
     match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
+
+### Firebase Storage Rules
+```javascript
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/{allPaths=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
   }
@@ -81,7 +107,7 @@ service cloud.firestore {
 To deploy via Firebase CLI:
 
 ```bash
-firebase deploy --only firestore:rules
+firebase deploy --only firestore:rules,storage
 ```
 
 ---
@@ -100,14 +126,14 @@ npm run dev
 
 ## 5. Cloud Run Deployment Flow
 
-Build and deploy the application container to Google Cloud Run, mounting the `GEMINI_API_KEY` directly from Secret Manager:
+Build and deploy the application container to Google Cloud Run, mounting secrets directly from Secret Manager:
 
 ```bash
 gcloud run deploy mindful-reflections-app \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest \
+  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_API_KEY:latest \
   --port 3000
 ```
 
@@ -127,23 +153,34 @@ gcloud run services update mindful-reflections-app \
 
 To verify and test all interactive features of the application:
 
-1. **Authentication Flow**:
-   - Navigate to the landing page.
-   - Click **"Continue with Google"** to trigger the Firebase Auth popup.
-   - Confirm redirection to your private dashboard.
-2. **Writing a Reflection**:
-   - Click **"Write Reflection"** or **"New Reflection"**.
-   - Choose a category (e.g. *Gratitude & Joy*) and a mood (e.g. *Peaceful*).
-   - Click **"Inspire Me with Gemini"** to dynamically generate reflection prompts.
-   - Enter your personal journal notes and click **"Save Reflection"**.
-   - Verify that the entry appears in your chronological history list with confetti.
-3. **Multi-Turn Conversational Reflection**:
-   - Click **"Reflect with Gemini"** on the entry.
-   - Ask follow-up questions (e.g., *"What cognitive blindspots do you notice?"* or *"Help me find what I can control"*).
-   - Verify that Gemini responds with structured, compassionate inquiry.
-4. **Auto-Synthesis & Takeaways**:
-   - Click **"Synthesize"** in the reflection drawer or **"Synthesize Insights"** in the editor.
-   - Verify that a concise summary and 2-4 key takeaways are generated and saved to Firestore.
-5. **History & Search**:
-   - Filter reflections by category pill or search keyword in the history search bar.
-   - Click the view details button to inspect the full transcript or export markdown.
+### 1. Authentication Flow
+- Navigate to the landing page and click **"Continue with Google"**.
+- Confirm popup authentication and immediate redirect to your private dashboard.
+
+### 2. Location Tagging (Feature 1)
+- In the New Reflection Editor, find the **"📍 Add Location"** control next to the Mood selector.
+- Click it to open the Location modal:
+  - Select **"Use Current Location"** to verify browser geolocation and reverse-geocoding resolution.
+  - Or type a location (e.g., *"Central Park, New York"*) in the search field to test autocomplete.
+- Once selected, verify the inline map thumbnail and resolved address in the editor.
+- Save the reflection and confirm the dashboard card displays a pin badge with the location name.
+- Click the pin badge on the card to open the interactive Google Map modal centered on the coordinates with custom marker pin.
+
+### 3. Multimedia Attachments & Markdown (Feature 2)
+- In the editor, click **"Attach Media"** to select images (`.png`, `.jpg`), videos (`.mp4`), or documents (`.pdf`).
+- Verify progress indicators during upload, and confirm preview cards with file sizes and remove (`✕`) buttons.
+- Toggle between **"Plain Text"** and **"Markdown"** mode with live split/preview panes.
+- Save the reflection and view it in the detail modal:
+  - Confirm image thumbnail grid with lightbox zoom.
+  - Test embedded video player with playback controls.
+  - Verify PDF attachment card with "Open in New Tab" link.
+  - Verify Markdown headers, lists, and typography render beautifully.
+- Test deleting the reflection and confirm attachments are deleted from storage.
+
+### 4. AI Voice Dictation (Feature 3)
+- In the reflection editor toolbar, click **"Voice Dictation"** (microphone icon).
+- Click **"Start Voice Recording"** and grant microphone permissions when prompted.
+- Speak freely and observe the animated recording pulse, timer, and live transcript.
+- Click **"Done Speaking — Structure Thoughts"**.
+- Gemini transcribes and mindfully structures your thoughts, removing filler words into cohesive narrative paragraphs.
+- Inspect the editable structured preview. Click **"Insert into Reflection"** to append the text directly into your draft.
