@@ -27,10 +27,9 @@ function getAIClient(): GoogleGenAI | null {
 
 // Fallback ladder of reliable models for high availability
 const MODEL_FALLBACK_LADDER = [
-  'gemini-2.5-flash',
-  'gemini-3.7-flash',
-  'gemini-1.5-flash',
-  'gemini-2.5-pro',
+  'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-flash-latest',
 ];
 
 // Helper to execute generation with automatic model fallback

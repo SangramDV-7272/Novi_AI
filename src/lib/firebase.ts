@@ -54,7 +54,7 @@ googleProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
-export const signInWithGoogle = async (): Promise<User> => {
+export const signInWithGoogle = async (): Promise<User | null> => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     // Ensure user profile document exists
@@ -86,6 +86,16 @@ export const signInWithGoogle = async (): Promise<User> => {
     }
     return result.user;
   } catch (error: any) {
+    const isUserCancellation =
+      error?.code === 'auth/popup-closed-by-user' ||
+      error?.message?.includes('popup-closed-by-user') ||
+      error?.code === 'auth/cancelled-popup-request';
+
+    if (isUserCancellation) {
+      // User closed the authentication window without signing in; benign cancellation
+      return null;
+    }
+
     console.error('Error signing in with Google:', error);
     throw error;
   }
