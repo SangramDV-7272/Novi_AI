@@ -1,6 +1,6 @@
 # Mindful Reflections - AI Journal
 
-A user-authenticated, privacy-first journaling and reflection web application powered by **Gemini 2.5 Flash & 2.5 Pro**, **Firebase Authentication (Google Sign-In)**, **Google Cloud Firestore**, **Firebase Storage**, and **Google Maps Platform**.
+A user-authenticated, privacy-first journaling and reflection web application powered by **Gemini 2.5 Flash & 2.5 Pro**, **Firebase Authentication (Google Sign-In)**, **Google Cloud Firestore**, **Firebase Storage**, and **OpenStreetMap with MapLibre GL**.
 
 ---
 
@@ -16,10 +16,13 @@ A user-authenticated, privacy-first journaling and reflection web application po
 3. **Multimedia & Storage Security**:
    - User uploads (images, video, PDFs) are partitioned by UID (`users/{userId}/attachments/*`).
    - File deletion removes artifacts from both Firestore and Cloud Storage, preventing orphaned files.
-4. **Server-Side AI & Maps Proxying**:
+4. **OpenStreetMap & MapLibre GL Mapping**:
+   - 100% open-source mapping stack with zero external API key requirements and zero mapping usage charges.
+   - Interactive WebGL rendering powered by MapLibre GL JS with layer switcher (Muted Carto Positron, OSM Standard, Voyager).
+   - Server-side Nominatim proxying (`/api/maps/geocode`, `/api/maps/places-search`) with compliance User-Agent headers.
+5. **Server-Side AI & Model Resilience**:
    - `GEMINI_API_KEY` is retained solely in server-side memory (`server.ts`) and never exposed to the client browser.
-   - Maps geocoding and Places autocomplete are proxied server-side to prevent CORS issues and protect secret keys.
-   - Voice audio structuring endpoint utilizes Gemini multimodal capabilities with resilience fallbacks.
+   - Voice audio structuring endpoint utilizes Gemini multimodal capabilities with fallback ladder (Gemini 2.5 Flash, 3.7 Flash, 1.5 Flash, 2.5 Pro).
 
 ---
 
@@ -37,34 +40,24 @@ gcloud services enable \
   secretmanager.googleapis.com \
   firestore.googleapis.com \
   identitytoolkit.googleapis.com \
-  storage.googleapis.com \
-  geocoding-backend.googleapis.com \
-  places-backend.googleapis.com \
-  maps-backend.googleapis.com
+  storage.googleapis.com
 ```
 
 ---
 
 ## 2. Secret Manager Configuration
 
-Securely store your `GEMINI_API_KEY` and optional `GOOGLE_MAPS_API_KEY` in Google Cloud Secret Manager and grant the default Cloud Run Compute Service Account accessor permissions:
+Securely store your `GEMINI_API_KEY` in Google Cloud Secret Manager and grant the default Cloud Run Compute Service Account accessor permissions:
 
 ```bash
-# Create and populate secrets
+# Create and populate Gemini secret
 gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
 echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
-
-gcloud secrets create GOOGLE_MAPS_API_KEY --replication-policy="automatic"
-echo -n "YOUR_MAPS_API_KEY" | gcloud secrets versions add GOOGLE_MAPS_API_KEY --data-file=-
 
 # Grant Secret Accessor role to the Cloud Run service account
 PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format="value(projectNumber)")
 
 gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-
-gcloud secrets add-iam-policy-binding GOOGLE_MAPS_API_KEY \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
@@ -126,14 +119,14 @@ npm run dev
 
 ## 5. Cloud Run Deployment Flow
 
-Build and deploy the application container to Google Cloud Run, mounting secrets directly from Secret Manager:
+Build and deploy the application container to Google Cloud Run, mounting the Gemini secret directly from Secret Manager:
 
 ```bash
 gcloud run deploy mindful-reflections-app \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_API_KEY:latest \
+  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest \
   --port 3000
 ```
 
@@ -157,27 +150,31 @@ To verify and test all interactive features of the application:
 - Navigate to the landing page and click **"Continue with Google"**.
 - Confirm popup authentication and immediate redirect to your private dashboard.
 
-### 2. Location Tagging (Feature 1)
+### 2. Location Tagging with OpenStreetMap & MapLibre GL
 - In the New Reflection Editor, find the **"📍 Add Location"** control next to the Mood selector.
-- Click it to open the Location modal:
-  - Select **"Use Current Location"** to verify browser geolocation and reverse-geocoding resolution.
-  - Or type a location (e.g., *"Central Park, New York"*) in the search field to test autocomplete.
-- Once selected, verify the inline map thumbnail and resolved address in the editor.
-- Save the reflection and confirm the dashboard card displays a pin badge with the location name.
-- Click the pin badge on the card to open the interactive Google Map modal centered on the coordinates with custom marker pin.
+- Click it to open the OpenStreetMap Location modal:
+  - Select **"Use Current Location"** to verify browser geolocation and reverse-geocoding via OpenStreetMap Nominatim.
+  - Or type a location (e.g., *"Central Park, New York"*) in the search field to test place search.
+- Once selected, verify the inline OpenStreetMap mini preview and resolved address in the editor.
+- Save the reflection and confirm the dashboard card displays an emerald location badge.
+- Click the location badge on the card to open the **Interactive MapLibre GL modal**:
+  - Test zooming, panning, and rotation controls.
+  - Test the **"Re-center"** button.
+  - Test the **"Style"** layer switcher (Muted Light, OSM Standard, Voyager).
+  - Test the link to view the marker directly on `openstreetmap.org`.
 
-### 3. Multimedia Attachments & Markdown (Feature 2)
+### 3. Multimedia Attachments & Markdown
 - In the editor, click **"Attach Media"** to select images (`.png`, `.jpg`), videos (`.mp4`), or documents (`.pdf`).
-- Verify progress indicators during upload, and confirm preview cards with file sizes and remove (`✕`) buttons.
+- Verify upload indicators and preview cards with file sizes and remove (`✕`) buttons.
 - Toggle between **"Plain Text"** and **"Markdown"** mode with live split/preview panes.
 - Save the reflection and view it in the detail modal:
   - Confirm image thumbnail grid with lightbox zoom.
   - Test embedded video player with playback controls.
   - Verify PDF attachment card with "Open in New Tab" link.
-  - Verify Markdown headers, lists, and typography render beautifully.
+  - Verify Markdown headers, lists, and typography render.
 - Test deleting the reflection and confirm attachments are deleted from storage.
 
-### 4. AI Voice Dictation (Feature 3)
+### 4. AI Voice Dictation
 - In the reflection editor toolbar, click **"Voice Dictation"** (microphone icon).
 - Click **"Start Voice Recording"** and grant microphone permissions when prompted.
 - Speak freely and observe the animated recording pulse, timer, and live transcript.

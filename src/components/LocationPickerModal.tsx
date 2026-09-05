@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { MapPin, Navigation, Search, X, Loader2, AlertCircle, Check } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { MapPin, Navigation, Search, X, Loader2, AlertCircle } from 'lucide-react';
 import type { LocationTag } from '../types';
-import firebaseConfig from '../../firebase-applet-config.json';
 
 interface LocationPickerModalProps {
   currentLocation?: LocationTag | null;
@@ -10,7 +9,7 @@ interface LocationPickerModalProps {
 }
 
 export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
-  currentLocation,
+  currentLocation: _currentLocation,
   onSelect,
   onClose,
 }) => {
@@ -21,10 +20,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const debounceTimeout = useRef<number | null>(null);
 
-  const mapsApiKey =
-    (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || (firebaseConfig as any).apiKey || '';
-
-  // Handle Search Input with debounce
+  // Handle Search Input with debounce for OpenStreetMap Nominatim
   const handleQueryChange = (val: string) => {
     setSearchQuery(val);
     setErrorMessage(null);
@@ -51,7 +47,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
       } finally {
         setIsSearching(false);
       }
-    }, 350);
+    }, 400);
   };
 
   // Use Current Geolocation
@@ -83,22 +79,17 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           const data = await res.json();
           const address = data.address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
 
-          const staticMapUrl = mapsApiKey
-            ? `https://maps.googleapis.com/maps/api/staticmap?center=${latitude},${longitude}&zoom=14&size=400x200&markers=color:green%7C${latitude},${longitude}&key=${mapsApiKey}`
-            : undefined;
-
           onSelect({
             latitude,
             longitude,
             address,
             placeName: 'Current Location',
             placeId: data.placeId,
-            staticMapUrl,
           });
           onClose();
         } catch (err: any) {
           console.error('Reverse geocode failed:', err);
-          // Still provide coordinate location so user is not blocked
+          // Fall back gracefully to coordinates so user is not blocked
           const latitude = pos.coords.latitude;
           const longitude = pos.coords.longitude;
           onSelect({
@@ -131,18 +122,13 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
     setErrorMessage(null);
 
     try {
-      if (prediction.latitude && prediction.longitude) {
-        const staticMapUrl = mapsApiKey
-          ? `https://maps.googleapis.com/maps/api/staticmap?center=${prediction.latitude},${prediction.longitude}&zoom=14&size=400x200&markers=color:green%7C${prediction.latitude},${prediction.longitude}&key=${mapsApiKey}`
-          : undefined;
-
+      if (typeof prediction.latitude === 'number' && typeof prediction.longitude === 'number') {
         onSelect({
           latitude: prediction.latitude,
           longitude: prediction.longitude,
           address: prediction.description,
           placeName: prediction.mainText,
           placeId: prediction.placeId,
-          staticMapUrl,
         });
         onClose();
         return;
@@ -160,9 +146,6 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
       }
 
       const data = await res.json();
-      const staticMapUrl = mapsApiKey
-        ? `https://maps.googleapis.com/maps/api/staticmap?center=${data.latitude},${data.longitude}&zoom=14&size=400x200&markers=color:green%7C${data.latitude},${data.longitude}&key=${mapsApiKey}`
-        : undefined;
 
       onSelect({
         latitude: data.latitude,
@@ -170,7 +153,6 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
         address: data.address || prediction.description,
         placeName: prediction.mainText || prediction.description.split(',')[0],
         placeId: data.placeId || prediction.placeId,
-        staticMapUrl,
       });
       onClose();
     } catch (err: any) {
@@ -199,9 +181,14 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
               <MapPin className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-serif text-lg font-medium text-stone-800">
-                Tag Location
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-serif text-lg font-medium text-stone-800">
+                  Tag Location
+                </h3>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  OpenStreetMap
+                </span>
+              </div>
               <p className="text-xs text-stone-500 font-sans">
                 Attach where this reflection took place
               </p>
@@ -230,12 +217,12 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
               id="use-current-location-btn"
               onClick={handleUseCurrentLocation}
               disabled={isLocating}
-              className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#EDE7DD] hover:bg-[#E5DFD4] text-stone-800 text-sm font-medium border border-stone-300 transition-colors disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#EDE7DD] hover:bg-[#E5DFD4] text-stone-800 text-sm font-medium border border-stone-300 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isLocating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-stone-600" />
-                  <span>Detecting Location…</span>
+                  <span>Detecting Location via Browser…</span>
                 </>
               ) : (
                 <>
@@ -249,7 +236,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           <div className="relative flex items-center justify-center">
             <div className="border-t border-stone-200 w-full" />
             <span className="bg-[#FCFAF7] px-3 text-xs text-stone-400 uppercase tracking-wider font-medium">
-              or search manually
+              or search OpenStreetMap
             </span>
             <div className="border-t border-stone-200 w-full" />
           </div>
@@ -263,7 +250,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => handleQueryChange(e.target.value)}
-                placeholder="Search city, park, cafe, sanctuary…"
+                placeholder="Search city, neighborhood, park, natural landmark…"
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white border border-stone-300 text-sm text-stone-800 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-700/30 focus:border-emerald-700 transition-all"
                 autoFocus
               />
@@ -279,9 +266,9 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                   <button
                     key={p.placeId || idx}
                     onClick={() => handleSelectPrediction(p)}
-                    className="w-full px-4 py-2.5 text-left hover:bg-[#F7F4EE] transition-colors flex items-start gap-2.5"
+                    className="w-full px-4 py-2.5 text-left hover:bg-[#F7F4EE] transition-colors flex items-start gap-2.5 cursor-pointer"
                   >
-                    <MapPin className="w-4 h-4 text-stone-400 mt-0.5 shrink-0" />
+                    <MapPin className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-stone-800 truncate">
                         {p.mainText || p.description}
@@ -299,7 +286,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
 
             {searchQuery.trim().length >= 2 && !isSearching && predictions.length === 0 && (
               <p className="text-xs text-stone-400 text-center py-2">
-                No matching places found. Try a different city or place name.
+                No matching places found. Try a broader city or landmark name.
               </p>
             )}
           </div>
@@ -309,7 +296,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
         <div className="px-6 py-3 bg-[#FAF7F2] border-t border-stone-200 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-stone-600 hover:text-stone-800 transition-colors"
+            className="px-4 py-2 text-xs font-medium text-stone-600 hover:text-stone-800 transition-colors cursor-pointer"
           >
             Cancel
           </button>

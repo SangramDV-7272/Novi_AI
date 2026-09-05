@@ -447,22 +447,13 @@ export const EntryEditor: React.FC<EntryEditorProps> = ({
       {/* Inline Location Static Thumbnail if set */}
       {location && (
         <div className="mb-6 p-3 rounded-xl bg-[#EFECE3]/70 border border-[#D1CDBE] flex flex-col sm:flex-row items-center gap-4">
-          {/* Static map or coordinates badge */}
+          {/* OpenStreetMap mini preview */}
           <div className="w-full sm:w-48 h-24 rounded-lg bg-stone-200 border border-stone-300 overflow-hidden shrink-0 relative flex items-center justify-center">
-            {location.staticMapUrl ? (
-              <img
-                src={location.staticMapUrl}
-                alt="Location thumbnail"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <iframe
-                title="Mini Map Preview"
-                className="w-full h-full border-0 pointer-events-none"
-                src={`https://maps.google.com/maps?q=${location.latitude},${location.longitude}&z=14&output=embed`}
-              />
-            )}
+            <iframe
+              title="OpenStreetMap Mini Preview"
+              className="w-full h-full border-0 pointer-events-none"
+              src={`https://www.openstreetmap.org/export/embed.html?bbox=${location.longitude - 0.008}%2C${location.latitude - 0.005}%2C${location.longitude + 0.008}%2C${location.latitude + 0.005}&layer=mapnik&marker=${location.latitude}%2C${location.longitude}`}
+            />
             <div className="absolute top-1 left-1 bg-black/60 text-[10px] text-white px-1.5 py-0.5 rounded backdrop-blur-xs font-mono">
               {location.latitude.toFixed(3)}, {location.longitude.toFixed(3)}
             </div>

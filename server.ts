@@ -288,48 +288,17 @@ Keep each prompt under 25 words. Return ONLY a JSON array of strings, e.g. ["Pro
   }
 });
 
-// Google Maps Configuration Endpoint
-app.get('/api/maps/config', (_req: Request, res: Response) => {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
-  res.json({
-    hasKey: Boolean(apiKey),
-    apiKey: apiKey || '',
-  });
-});
-
-// Google Maps Geocoding & Reverse-Geocoding Proxy (mitigates client CORS)
+// OpenStreetMap & Geocoding Proxy (Reverse & Forward Geocoding via Nominatim)
 app.post('/api/maps/geocode', async (req: Request, res: Response): Promise<void> => {
   try {
     const { latitude, longitude, address } = req.body;
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
-    // If coordinates provided: Reverse Geocoding
+    // If coordinates provided: Reverse Geocoding via OpenStreetMap Nominatim
     if (typeof latitude === 'number' && typeof longitude === 'number') {
-      if (apiKey) {
-        try {
-          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
-          const gResponse = await fetch(url);
-          const gData = await gResponse.json();
-          if (gData.status === 'OK' && gData.results && gData.results.length > 0) {
-            const first = gData.results[0];
-            res.json({
-              address: first.formatted_address,
-              latitude,
-              longitude,
-              placeId: first.place_id,
-            });
-            return;
-          }
-        } catch (err) {
-          console.warn('Google Geocode failed, using fallback:', err);
-        }
-      }
-
-      // Nominatim open reverse geocoding fallback for zero-friction testing
       try {
         const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=16&addressdetails=1`;
         const nomRes = await fetch(nomUrl, {
-          headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0' },
+          headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0 (contact: support@mindfulreflections.app)' },
         });
         if (nomRes.ok) {
           const nomData = await nomRes.json();
@@ -338,6 +307,7 @@ app.post('/api/maps/geocode', async (req: Request, res: Response): Promise<void>
             address: displayName,
             latitude,
             longitude,
+            placeId: String(nomData.place_id || ''),
           });
           return;
         }
@@ -353,33 +323,12 @@ app.post('/api/maps/geocode', async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // If address text provided: Forward Geocoding
+    // If address text provided: Forward Geocoding via OpenStreetMap Nominatim
     if (typeof address === 'string' && address.trim()) {
-      if (apiKey) {
-        try {
-          const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
-          const gResponse = await fetch(url);
-          const gData = await gResponse.json();
-          if (gData.status === 'OK' && gData.results && gData.results.length > 0) {
-            const first = gData.results[0];
-            res.json({
-              address: first.formatted_address,
-              latitude: first.geometry.location.lat,
-              longitude: first.geometry.location.lng,
-              placeId: first.place_id,
-            });
-            return;
-          }
-        } catch (err) {
-          console.warn('Google Forward Geocode failed, using fallback:', err);
-        }
-      }
-
-      // Nominatim search fallback
       try {
-        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&addressdetails=1`;
         const nomRes = await fetch(nomUrl, {
-          headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0' },
+          headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0 (contact: support@mindfulreflections.app)' },
         });
         if (nomRes.ok) {
           const nomData = await nomRes.json();
@@ -389,6 +338,7 @@ app.post('/api/maps/geocode', async (req: Request, res: Response): Promise<void>
               address: first.display_name,
               latitude: parseFloat(first.lat),
               longitude: parseFloat(first.lon),
+              placeId: String(first.place_id || ''),
             });
             return;
           }
@@ -408,7 +358,7 @@ app.post('/api/maps/geocode', async (req: Request, res: Response): Promise<void>
   }
 });
 
-// Google Places Search / Autocomplete Proxy
+// OpenStreetMap Places / Nominatim Search Proxy
 app.post('/api/maps/places-search', async (req: Request, res: Response): Promise<void> => {
   try {
     const { query } = req.body;
@@ -417,33 +367,11 @@ app.post('/api/maps/places-search', async (req: Request, res: Response): Promise
       return;
     }
 
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
-
-    if (apiKey) {
-      try {
-        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}`;
-        const gResponse = await fetch(url);
-        const gData = await gResponse.json();
-        if (gData.status === 'OK' && Array.isArray(gData.predictions)) {
-          const predictions = gData.predictions.map((p: any) => ({
-            placeId: p.place_id,
-            description: p.description,
-            mainText: p.structured_formatting?.main_text || p.description,
-            secondaryText: p.structured_formatting?.secondary_text || '',
-          }));
-          res.json({ predictions });
-          return;
-        }
-      } catch (err) {
-        console.warn('Google Places autocomplete failed, falling back:', err);
-      }
-    }
-
-    // Nominatim autocomplete / search fallback
+    // Query Nominatim search
     try {
-      const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`;
+      const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=6&addressdetails=1`;
       const nomRes = await fetch(nomUrl, {
-        headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0' },
+        headers: { 'User-Agent': 'MindfulReflections-AIJournal/1.0 (contact: support@mindfulreflections.app)' },
       });
       if (nomRes.ok) {
         const items = await nomRes.json();
