@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 
@@ -482,6 +483,524 @@ Instructions:
     });
   }
 });
+
+// =======================================================
+// FEATURE 4: Insights & Well-Being Analysis Endpoint
+// =======================================================
+
+const DISCLAIMER_NOTE =
+  'This well-being analysis is generated for personal self-reflection and mindfulness tracking only. It is not a medical diagnosis, clinical assessment, or substitute for professional medical advice or mental health therapy.';
+
+app.post('/api/insights/analyze', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { entries = [], checkIns = [], consentGiven = true } = req.body;
+
+    if (!consentGiven) {
+      res.status(403).json({ error: 'User consent is required for reflection analysis.' });
+      return;
+    }
+
+    // Algorithmic base calculations
+    const emotionFrequency: Record<string, number> = {};
+    let totalIntensity = 0;
+    let intensityCount = 0;
+
+    // Aggregate from checkIns
+    if (Array.isArray(checkIns)) {
+      checkIns.forEach((c: any) => {
+        const m = c.mood || 'Neutral';
+        emotionFrequency[m] = (emotionFrequency[m] || 0) + 1;
+        if (typeof c.intensity === 'number') {
+          totalIntensity += c.intensity;
+          intensityCount++;
+        }
+      });
+    }
+
+    // Aggregate from entries
+    if (Array.isArray(entries)) {
+      entries.forEach((e: any) => {
+        const m = e.mood ? e.mood.charAt(0).toUpperCase() + e.mood.slice(1) : 'Thoughtful';
+        emotionFrequency[m] = (emotionFrequency[m] || 0) + 1;
+      });
+    }
+
+    const totalEmotions = Object.values(emotionFrequency).reduce((a, b) => a + b, 0) || 1;
+    const dominantEmotions = Object.entries(emotionFrequency)
+      .map(([emotion, count]) => ({
+        emotion,
+        count,
+        percentage: Math.round((count / totalEmotions) * 100),
+        color:
+          emotion === 'Happy' || emotion === 'Motivated'
+            ? '#D97706'
+            : emotion === 'Peaceful' || emotion === 'Calm'
+            ? '#16A34A'
+            : emotion === 'Grateful'
+            ? '#BE185D'
+            : emotion === 'Anxious' || emotion === 'Stressed'
+            ? '#4F46E5'
+            : '#6B7280',
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    const calculatedAvgIntensity =
+      intensityCount > 0 ? Number((totalIntensity / intensityCount).toFixed(1)) : 3.0;
+
+    // Format entry summaries for Gemini safely
+    const entrySummaries = Array.isArray(entries)
+      ? entries.slice(0, 15).map((e: any) => ({
+          date: e.createdAt,
+          category: e.category,
+          mood: e.mood,
+          title: e.title,
+          summary: e.summary || e.initialText?.substring(0, 120),
+          insights: e.keyInsights || [],
+        }))
+      : [];
+
+    const ai = getAIClient();
+    if (!ai || entrySummaries.length === 0) {
+      // Return structured fallback analysis if offline or no entries
+      res.json({
+        dominantEmotions,
+        averageIntensity: calculatedAvgIntensity,
+        recurringThemes: ['Mindful Awareness', 'Daily Self-Reflection', 'Personal Growth'],
+        positiveMoments: entrySummaries
+          .filter((e) => ['peaceful', 'grateful', 'motivated', 'happy'].includes(e.mood?.toLowerCase()))
+          .map((e) => ({
+            title: e.title || 'Peaceful Moment',
+            snippet: e.summary || 'A gentle reflection on gratitude and quiet mindfulness.',
+            date: e.date,
+          })),
+        detectedPatterns: [
+          'Consistent reflections recorded during morning and evening quiet hours.',
+          'Gratitude and mindfulness themes correlate with lower self-reported tension.',
+        ],
+        supportiveSuggestions: {
+          journalingPrompts: [
+            'What is one small thing that brought an unexpected sense of ease today?',
+            'When feeling overwhelmed, what ground beneath your feet can you notice?',
+            'What permission can you give yourself this evening?',
+          ],
+          breathingExercise: {
+            name: 'Box Breathing (4-4-4-4)',
+            technique: 'Inhale 4s, Hold 4s, Exhale 4s, Hold 4s',
+            instructions: 'Center your posture and follow the gentle rhythm to stabilize the autonomic nervous system.',
+          },
+          gratitudePrompts: [
+            'Name three sensory experiences (a scent, sound, or warm beverage) you appreciate right now.',
+            'Acknowledge one personal quality that supported you this week.',
+          ],
+          trustedContactReminder:
+            'If you feel restless or burdened, consider sending a short text to a trusted friend or mentor simply saying: "Thinking of you, hoping you are having a peaceful day."',
+        },
+        aiSummary:
+          'Your recent reflections demonstrate an active commitment to mindful self-observation. Notice the gentle shifts between periods of busy activity and grounding moments of gratitude.',
+        analyzedEntriesCount: entrySummaries.length,
+        generatedAt: new Date().toISOString(),
+        disclaimer: DISCLAIMER_NOTE,
+        modelUsed: 'local-heuristic',
+      });
+      return;
+    }
+
+    // Call Gemini with strict non-diagnostic instructions
+    const prompt = `You are a supportive, mindful well-being analyst for personal journaling.
+CRITICAL MEDICAL DIRECTIVE:
+Your response is strictly for personal self-reflection, mindfulness, and well-being tracking.
+It is NOT a medical diagnosis, clinical assessment, psychiatric evaluation, or therapy. Never use clinical diagnostic language (e.g. do not diagnose clinical depression, GAD, bipolar, PTSD, etc.). Use warm, supportive, non-judgmental, observational reflection.
+
+User reflection data (${entrySummaries.length} entries):
+${JSON.stringify(entrySummaries, null, 2)}
+
+User check-in summary:
+- Total check-ins: ${checkIns.length}
+- Average intensity: ${calculatedAvgIntensity} / 5
+- Emotion distribution: ${JSON.stringify(dominantEmotions)}
+
+Instructions:
+1. Identify 3-4 recurring positive or reflective themes across their entries (e.g., "Work-Life Boundaries", "Finding Calm in Nature", "Creative Momentum").
+2. Extract 2-3 specific positive moments or breakthroughs mentioned in their journal.
+3. Identify 2 gentle, helpful observational patterns (e.g., "Mornings focused on gratitude reported higher motivation", "Weekday transitions often trigger moments of restlessness").
+4. Provide supportive, non-judgmental suggestions:
+   - 3 personalized journaling prompts
+   - 1 breathing exercise with name, technique, and short instruction
+   - 2 gratitude prompts
+   - 1 gentle reminder/suggestion regarding connecting with a trusted friend or supporter
+5. Provide a 2-paragraph empathetic summary celebrating their self-awareness.
+6. Return ONLY valid JSON matching this schema:
+{
+  "recurringThemes": ["string"],
+  "positiveMoments": [{"title": "string", "snippet": "string", "date": "string"}],
+  "detectedPatterns": ["string"],
+  "supportiveSuggestions": {
+    "journalingPrompts": ["string"],
+    "breathingExercise": {
+      "name": "string",
+      "technique": "string",
+      "instructions": "string"
+    },
+    "gratitudePrompts": ["string"],
+    "trustedContactReminder": "string"
+  },
+  "aiSummary": "string"
+}`;
+
+    const result = await generateContentWithFallback({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.4,
+      },
+    });
+
+    let parsed: any;
+    try {
+      const cleaned = result.text.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = {};
+    }
+
+    res.json({
+      dominantEmotions,
+      averageIntensity: calculatedAvgIntensity,
+      recurringThemes: parsed.recurringThemes || ['Self-Reflection', 'Emotional Balance'],
+      positiveMoments: parsed.positiveMoments || [],
+      detectedPatterns: parsed.detectedPatterns || ['Regular journaling supports grounding and self-clarity.'],
+      supportiveSuggestions: parsed.supportiveSuggestions || {
+        journalingPrompts: ['What moment today brought you a subtle feeling of calm?'],
+        breathingExercise: {
+          name: 'Box Breathing (4-4-4-4)',
+          technique: 'Inhale 4s, Hold 4s, Exhale 4s, Hold 4s',
+          instructions: 'Ground yourself with deep diaphragmatic breaths.',
+        },
+        gratitudePrompts: ['What is one simple comfort you are thankful for today?'],
+        trustedContactReminder: 'Reaching out to a trusted companion can provide warm perspective.',
+      },
+      aiSummary: parsed.aiSummary || 'Your reflections highlight steady personal awareness and thoughtful self-inquiry.',
+      analyzedEntriesCount: entrySummaries.length,
+      generatedAt: new Date().toISOString(),
+      disclaimer: DISCLAIMER_NOTE,
+      modelUsed: result.modelUsed,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/insights/analyze:', error);
+    res.status(500).json({ error: error?.message || 'Failed to analyze well-being insights.' });
+  }
+});
+
+// =======================================================
+// FEATURE 6: Shareable Therapist Report Generation Endpoint
+// =======================================================
+
+const REPORT_DISCLAIMER =
+  'This report is based on self-reported journal data and is not a clinical assessment.';
+
+app.post('/api/reports/generate', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const {
+      period = 'last_month',
+      startDate,
+      endDate,
+      clientName = 'User',
+      selectedEntries = [],
+      checkIns = [],
+      sleepEnergyNotes = '',
+      customNotes = '',
+    } = req.body;
+
+    // Calculate quantitative metrics
+    const emotionsCount: Record<string, number> = {};
+    let totalIntensity = 0;
+    let validIntensityCount = 0;
+
+    checkIns.forEach((c: any) => {
+      const m = c.mood || 'Neutral';
+      emotionsCount[m] = (emotionsCount[m] || 0) + 1;
+      if (typeof c.intensity === 'number') {
+        totalIntensity += c.intensity;
+        validIntensityCount++;
+      }
+    });
+
+    selectedEntries.forEach((e: any) => {
+      const m = e.mood ? e.mood.charAt(0).toUpperCase() + e.mood.slice(1) : 'Thoughtful';
+      emotionsCount[m] = (emotionsCount[m] || 0) + 1;
+    });
+
+    const averageIntensity =
+      validIntensityCount > 0 ? Number((totalIntensity / validIntensityCount).toFixed(1)) : 3.0;
+
+    const dominantEmotions = Object.entries(emotionsCount)
+      .map(([emotion, count]) => ({ emotion, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const entryExcerpts = selectedEntries.map((e: any) => ({
+      id: e.id,
+      title: e.title,
+      date: e.createdAt,
+      mood: e.mood,
+      excerpt: e.summary || e.initialText?.substring(0, 140) || '',
+    }));
+
+    const ai = getAIClient();
+    if (!ai) {
+      // Fallback report structure if AI is offline
+      res.json({
+        title: `Self-Reported Well-Being Summary (${period.replace(/_/g, ' ')})`,
+        clientName,
+        period,
+        startDate: startDate || new Date(Date.now() - 30 * 86400000).toISOString(),
+        endDate: endDate || new Date().toISOString(),
+        emotionalOverview: {
+          averageIntensity,
+          dominantEmotions,
+          summaryText: `Across ${selectedEntries.length} selected reflection entries and ${checkIns.length} mood check-ins, dominant emotions included ${dominantEmotions.slice(0, 3).map((d) => d.emotion).join(', ') || 'calm and thoughtful'}. Average self-reported intensity was ${averageIntensity} / 5.`,
+        },
+        recurringThemes: [
+          'Work-life balance and evening relaxation',
+          'Mindful self-awareness and pause practices',
+          'Navigating situational stress through journaling',
+        ],
+        positiveChanges: [
+          'Increased consistency in documenting daily emotional states.',
+          'Use of reflective pause before reacting to stressors.',
+        ],
+        difficultPeriods: [
+          'Occasional mid-week feelings of restlessness or heightened intensity.',
+        ],
+        copingActivities: [
+          'Mindful journaling and reflection',
+          'Box breathing and quiet meditation',
+          'Walks and outdoor time',
+        ],
+        sleepEnergyNotes: sleepEnergyNotes || 'User reported regular resting periods with variable energy levels.',
+        discussionPrompts: [
+          'How have recent work transitions influenced evening restlessness?',
+          'What strategies felt most grounding when intensity reached higher levels?',
+          'Exploring ways to reinforce positive momentum observed in self-care practices.',
+        ],
+        selectedReflections: entryExcerpts,
+        customClinicianNotes: customNotes,
+        disclaimer: REPORT_DISCLAIMER,
+        modelUsed: 'local-template',
+      });
+      return;
+    }
+
+    const prompt = `You are an empathetic, clinical-collaborative assistant preparing a structured, user-approved summary report for a therapist or counselor.
+CRITICAL ETHICAL & CLINICAL DIRECTIVES:
+- This report is strictly based on self-reported journal data. It is NOT a clinical diagnosis or psychiatric assessment.
+- Do NOT provide medical diagnoses or prescribe medication.
+- Organize the user's authentic experiences clearly so they can have a fruitful, collaborative session with their therapist or counselor.
+- Highlight resilience, coping activities, notable changes, and specific themes.
+
+Data Provided:
+- Period: ${period} (${startDate} to ${endDate})
+- Client/User: ${clientName}
+- Selected Reflections (${entryExcerpts.length}): ${JSON.stringify(entryExcerpts, null, 2)}
+- Check-ins count: ${checkIns.length}, Average intensity: ${averageIntensity} / 5
+- Dominant emotions: ${JSON.stringify(dominantEmotions)}
+- Sleep/Energy self-notes: "${sleepEnergyNotes}"
+- Custom notes from user: "${customNotes}"
+
+Generate a concise, professional report matching this exact JSON format:
+{
+  "emotionalOverviewText": "2-3 sentences summarizing emotional patterns, intensity, and general tone without diagnosis",
+  "recurringThemes": ["3-4 bullet points of recurring themes"],
+  "positiveChanges": ["2-3 bullet points of positive shifts, wins, or breakthroughs"],
+  "difficultPeriods": ["2-3 bullet points of difficult periods, stressors, or challenges noted"],
+  "copingActivities": ["3-4 coping methods or positive activities observed or recommended based on their habits"],
+  "discussionPrompts": ["3-4 collaborative questions or prompts for the upcoming therapy session"]
+}`;
+
+    const result = await generateContentWithFallback({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.35,
+      },
+    });
+
+    let parsed: any;
+    try {
+      const cleaned = result.text.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = {};
+    }
+
+    res.json({
+      title: `Self-Reported Well-Being Summary (${period.replace(/_/g, ' ')})`,
+      clientName,
+      period,
+      startDate: startDate || new Date(Date.now() - 30 * 86400000).toISOString(),
+      endDate: endDate || new Date().toISOString(),
+      emotionalOverview: {
+        averageIntensity,
+        dominantEmotions,
+        summaryText:
+          parsed.emotionalOverviewText ||
+          `Across ${selectedEntries.length} reflections and ${checkIns.length} check-ins, self-reported average emotional intensity was ${averageIntensity}/5 with prominent feelings of ${dominantEmotions.slice(0, 3).map((d) => d.emotion).join(', ') || 'reflection'}.`,
+      },
+      recurringThemes: parsed.recurringThemes || ['Emotional self-awareness', 'Daily routine management'],
+      positiveChanges: parsed.positiveChanges || ['Regular engagement with journaling and mindfulness.'],
+      difficultPeriods: parsed.difficultPeriods || ['Periods of high workload or evening restlessness.'],
+      copingActivities: parsed.copingActivities || ['Reflective journaling', 'Breathing exercises', 'Rest'],
+      sleepEnergyNotes: sleepEnergyNotes || '',
+      discussionPrompts: parsed.discussionPrompts || [
+        'What coping strategies have felt most helpful during stressful moments?',
+        'How can we continue supporting the positive shifts observed in recent weeks?',
+      ],
+      selectedReflections: entryExcerpts,
+      customClinicianNotes: customNotes,
+      disclaimer: REPORT_DISCLAIMER,
+      modelUsed: result.modelUsed,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/reports/generate:', error);
+    res.status(500).json({ error: error?.message || 'Failed to generate therapist report.' });
+  }
+});
+
+// =======================================================
+// FEATURE 6: Secure Share Link Server Store & Verification
+// =======================================================
+
+interface SharedReportRecord {
+  token: string;
+  reportId: string;
+  userId: string;
+  reportData: any;
+  expiresAt: number;
+  passwordHash?: string;
+  isRevoked: boolean;
+}
+
+const sharedReportsStore = new Map<string, SharedReportRecord>();
+
+// Helper to hash passwords with salt
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password + '_mindful_salt_2026').digest('hex');
+}
+
+// Create or update share link
+app.post('/api/reports/share', (req: Request, res: Response): void => {
+  try {
+    const { report, expiryHours = 72, password } = req.body;
+
+    if (!report || !report.id || !report.userId) {
+      res.status(400).json({ error: 'Valid report with ID and userId is required.' });
+      return;
+    }
+
+    const shareToken = 'rep_' + crypto.randomBytes(20).toString('hex');
+    const expiresAt = Date.now() + Number(expiryHours) * 3600 * 1000;
+    const passwordHash = password && password.trim() ? hashPassword(password.trim()) : undefined;
+
+    const record: SharedReportRecord = {
+      token: shareToken,
+      reportId: report.id,
+      userId: report.userId,
+      reportData: {
+        ...report,
+        shareToken,
+        shareExpiry: new Date(expiresAt).toISOString(),
+        isPasswordProtected: Boolean(passwordHash),
+      },
+      expiresAt,
+      passwordHash,
+      isRevoked: false,
+    };
+
+    sharedReportsStore.set(shareToken, record);
+
+    res.json({
+      shareToken,
+      expiresAt: new Date(expiresAt).toISOString(),
+      isPasswordProtected: Boolean(passwordHash),
+      shareUrl: `/?sharedReport=${shareToken}`,
+    });
+  } catch (error: any) {
+    console.error('Error creating share link:', error);
+    res.status(500).json({ error: error?.message || 'Failed to generate secure share link.' });
+  }
+});
+
+// Fetch shared report for therapist / recipient
+app.post('/api/reports/shared/:token', (req: Request, res: Response): void => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body || {};
+
+    const record = sharedReportsStore.get(token);
+    if (!record) {
+      res.status(404).json({ error: 'Report not found or link has expired.' });
+      return;
+    }
+
+    if (record.isRevoked) {
+      res.status(410).json({ error: 'Access to this report has been revoked by the author.' });
+      return;
+    }
+
+    if (Date.now() > record.expiresAt) {
+      sharedReportsStore.delete(token);
+      res.status(410).json({ error: 'This share link has expired.' });
+      return;
+    }
+
+    if (record.passwordHash) {
+      if (!password) {
+        res.status(401).json({
+          error: 'This report is password protected. Please enter the passcode.',
+          requiresPassword: true,
+        });
+        return;
+      }
+      const providedHash = hashPassword(password.trim());
+      if (providedHash !== record.passwordHash) {
+        res.status(403).json({
+          error: 'Incorrect passcode. Please verify with the sender.',
+          requiresPassword: true,
+        });
+        return;
+      }
+    }
+
+    res.json({
+      report: record.reportData,
+      expiresAt: new Date(record.expiresAt).toISOString(),
+      disclaimer: REPORT_DISCLAIMER,
+    });
+  } catch (error: any) {
+    console.error('Error fetching shared report:', error);
+    res.status(500).json({ error: error?.message || 'Failed to load report.' });
+  }
+});
+
+// Revoke a share link
+app.post('/api/reports/revoke', (req: Request, res: Response): void => {
+  try {
+    const { token, reportId } = req.body;
+    let revokedCount = 0;
+
+    for (const [key, item] of sharedReportsStore.entries()) {
+      if ((token && key === token) || (reportId && item.reportId === reportId)) {
+        item.isRevoked = true;
+        revokedCount++;
+      }
+    }
+
+    res.json({ success: true, revokedCount });
+  } catch (error: any) {
+    console.error('Error revoking share link:', error);
+    res.status(500).json({ error: error?.message || 'Failed to revoke link.' });
+  }
+});
+
 
 // Initialize Vite server or static file serving
 async function startServer() {

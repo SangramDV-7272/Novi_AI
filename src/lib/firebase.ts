@@ -27,7 +27,13 @@ import {
   deleteObject,
   FirebaseStorage,
 } from 'firebase/storage';
-import type { JournalEntry, MediaAttachment } from '../types';
+import type {
+  JournalEntry,
+  MediaAttachment,
+  CheckInRecord,
+  ReminderSettings,
+  TherapistReportData,
+} from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
@@ -314,3 +320,176 @@ export const deleteEntryFromFirestore = async (
   const entryRef = doc(db, 'users', userId, 'entries', entryId);
   await deleteDoc(entryRef);
 };
+
+// ==========================================
+// FEATURE 5: Mood Check-Ins Persistence
+// ==========================================
+
+export const saveCheckInRecord = async (
+  userId: string,
+  checkIn: CheckInRecord
+): Promise<void> => {
+  if (!userId || !checkIn.id) throw new Error('User ID and CheckIn ID are required.');
+  const checkInRef = doc(db, 'users', userId, 'checkins', checkIn.id);
+  const cleanData = sanitizePayload(checkIn);
+  await setDoc(checkInRef, cleanData, { merge: true });
+};
+
+export const fetchUserCheckIns = async (userId: string): Promise<CheckInRecord[]> => {
+  if (!userId) return [];
+  try {
+    const colRef = collection(db, 'users', userId, 'checkins');
+    const q = query(colRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    const records: CheckInRecord[] = [];
+    snapshot.forEach((docSnap) => {
+      const d = docSnap.data();
+      records.push({
+        id: docSnap.id,
+        userId: d.userId || userId,
+        mood: d.mood || 'Neutral',
+        intensity: d.intensity || 3,
+        notes: d.notes || '',
+        activities: Array.isArray(d.activities) ? d.activities : [],
+        location: d.location || null,
+        createdAt: d.createdAt || new Date().toISOString(),
+        updatedAt: d.updatedAt || new Date().toISOString(),
+      });
+    });
+    return records;
+  } catch (error) {
+    console.warn('CheckIns query error, attempting unsorted fallback:', error);
+    try {
+      const colRef = collection(db, 'users', userId, 'checkins');
+      const snapshot = await getDocs(colRef);
+      const records: CheckInRecord[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        records.push({
+          id: docSnap.id,
+          userId: d.userId || userId,
+          mood: d.mood || 'Neutral',
+          intensity: d.intensity || 3,
+          notes: d.notes || '',
+          activities: Array.isArray(d.activities) ? d.activities : [],
+          location: d.location || null,
+          createdAt: d.createdAt || new Date().toISOString(),
+          updatedAt: d.updatedAt || new Date().toISOString(),
+        });
+      });
+      return records.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    } catch (inner) {
+      console.error('Failed to fetch check-ins:', inner);
+      return [];
+    }
+  }
+};
+
+export const deleteCheckInRecord = async (
+  userId: string,
+  checkInId: string
+): Promise<void> => {
+  if (!userId || !checkInId) return;
+  const checkInRef = doc(db, 'users', userId, 'checkins', checkInId);
+  await deleteDoc(checkInRef);
+};
+
+export const saveUserCheckIn = saveCheckInRecord;
+export const deleteUserCheckIn = deleteCheckInRecord;
+
+// ==========================================
+// FEATURE 5: Reminder Settings Persistence
+// ==========================================
+
+export const saveUserReminderSettings = async (
+  userId: string,
+  settings: ReminderSettings
+): Promise<void> => {
+  if (!userId) return;
+  const settingsRef = doc(db, 'users', userId, 'settings', 'reminders');
+  const cleanData = sanitizePayload(settings);
+  await setDoc(settingsRef, cleanData, { merge: true });
+};
+
+export const fetchUserReminderSettings = async (
+  userId: string
+): Promise<ReminderSettings | null> => {
+  if (!userId) return null;
+  try {
+    const settingsRef = doc(db, 'users', userId, 'settings', 'reminders');
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        enabled: Boolean(data.enabled),
+        timeOfDay: data.timeOfDay || '20:00',
+        lastDismissedDate: data.lastDismissedDate,
+      };
+    }
+    return {
+      enabled: false,
+      timeOfDay: '20:00',
+    };
+  } catch (err) {
+    console.warn('Could not load reminder settings:', err);
+    return null;
+  }
+};
+
+// ==========================================
+// FEATURE 6: Therapist Reports Persistence
+// ==========================================
+
+export const saveTherapistReport = async (
+  userId: string,
+  report: TherapistReportData
+): Promise<void> => {
+  if (!userId || !report.id) throw new Error('User ID and Report ID are required.');
+  const reportRef = doc(db, 'users', userId, 'shared_reports', report.id);
+  const cleanData = sanitizePayload(report);
+  await setDoc(reportRef, cleanData, { merge: true });
+};
+
+export const fetchUserTherapistReports = async (
+  userId: string
+): Promise<TherapistReportData[]> => {
+  if (!userId) return [];
+  try {
+    const colRef = collection(db, 'users', userId, 'shared_reports');
+    const snapshot = await getDocs(colRef);
+    const reports: TherapistReportData[] = [];
+    snapshot.forEach((docSnap) => {
+      reports.push({
+        id: docSnap.id,
+        ...(docSnap.data() as any),
+      });
+    });
+    return reports.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  } catch (error) {
+    console.error('Error fetching therapist reports:', error);
+    return [];
+  }
+};
+
+export const deleteTherapistReport = async (
+  userId: string,
+  reportId: string
+): Promise<void> => {
+  if (!userId || !reportId) return;
+  const reportRef = doc(db, 'users', userId, 'shared_reports', reportId);
+  await deleteDoc(reportRef);
+};
+
+export const revokeTherapistReport = async (
+  userId: string,
+  reportId: string
+): Promise<void> => {
+  if (!userId || !reportId) return;
+  const reportRef = doc(db, 'users', userId, 'shared_reports', reportId);
+  await setDoc(reportRef, { isRevoked: true }, { merge: true });
+};
+

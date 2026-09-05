@@ -31,6 +31,47 @@
         "createdAt": { "type": "string", "description": "ISO timestamp when entry was started" },
         "updatedAt": { "type": "string", "description": "ISO timestamp of latest update" }
       }
+    },
+    "CheckInRecord": {
+      "path": "users/{userId}/checkins/{checkinId}",
+      "description": "Quick daily mood check-in with intensity, activity tags, notes, and location",
+      "fields": {
+        "id": { "type": "string", "description": "Unique check-in ID" },
+        "userId": { "type": "string", "description": "Owner user ID" },
+        "mood": { "type": "string", "description": "Mood: Happy, Calm, Neutral, Sad, Anxious, Angry, Stressed, Excited" },
+        "intensity": { "type": "number", "description": "Intensity level from 1 to 5" },
+        "notes": { "type": "string", "description": "Optional notes or thoughts" },
+        "activities": { "type": "array", "description": "Optional activity or context tags" },
+        "location": { "type": "object", "description": "Optional location tag" },
+        "createdAt": { "type": "string", "description": "ISO timestamp when check-in was logged" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of update" }
+      }
+    },
+    "TherapistReport": {
+      "path": "users/{userId}/shared_reports/{reportId}",
+      "description": "User-approved summary report for therapist or counselor discussion",
+      "fields": {
+        "id": { "type": "string", "description": "Unique report ID" },
+        "userId": { "type": "string", "description": "Owner user ID" },
+        "title": { "type": "string", "description": "Title of report" },
+        "period": { "type": "string", "description": "Period scope: last_week, last_month, last_three_months, custom" },
+        "startDate": { "type": "string", "description": "Start ISO date" },
+        "endDate": { "type": "string", "description": "End ISO date" },
+        "emotionalOverview": { "type": "object", "description": "Calculated averages and overview text" },
+        "recurringThemes": { "type": "array", "description": "Identified themes" },
+        "positiveChanges": { "type": "array", "description": "Positive shifts and wins" },
+        "difficultPeriods": { "type": "array", "description": "Difficult times and triggers" },
+        "copingActivities": { "type": "array", "description": "Self-care and coping activities" },
+        "sleepEnergyNotes": { "type": "string", "description": "User notes regarding sleep and physical energy" },
+        "discussionPrompts": { "type": "array", "description": "Suggested questions or discussion points for sessions" },
+        "selectedEntrySummaries": { "type": "array", "description": "Summaries of user-approved reflections" },
+        "shareToken": { "type": "string", "description": "Cryptographic or secure token for access" },
+        "shareExpiry": { "type": "string", "description": "ISO timestamp of link expiration" },
+        "isPasswordProtected": { "type": "boolean", "description": "Whether passcode is required" },
+        "passwordHash": { "type": "string", "description": "Optional password hash or verification code" },
+        "isRevoked": { "type": "boolean", "description": "Whether link access has been manually revoked" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of generation" }
+      }
     }
   }
 }

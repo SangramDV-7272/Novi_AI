@@ -38,6 +38,7 @@ import type {
 
 interface EntryEditorProps {
   initialEntry?: JournalEntry | null;
+  initialPrompt?: string | null;
   userId: string;
   onSave: (entry: JournalEntry) => Promise<void>;
   onOpenConversation: (entry: JournalEntry) => void;
@@ -55,17 +56,20 @@ const CATEGORIES: ReflectionCategory[] = [
 
 export const EntryEditor: React.FC<EntryEditorProps> = ({
   initialEntry,
+  initialPrompt,
   userId,
   onSave,
   onOpenConversation,
   onCancel,
 }) => {
-  const [title, setTitle] = useState(initialEntry?.title || '');
+  const [title, setTitle] = useState(initialEntry?.title || (initialPrompt ? 'Reflection on Prompt' : ''));
   const [category, setCategory] = useState<ReflectionCategory>(
     initialEntry?.category || 'Daily Reflection'
   );
   const [mood, setMood] = useState<MoodType>(initialEntry?.mood || 'thoughtful');
-  const [text, setText] = useState(initialEntry?.initialText || '');
+  const [text, setText] = useState(
+    initialEntry?.initialText || (initialPrompt ? `*Prompt: ${initialPrompt}*\n\n` : '')
+  );
   const [summary, setSummary] = useState(initialEntry?.summary || '');
   const [keyInsights, setKeyInsights] = useState<string[]>(initialEntry?.keyInsights || []);
 
