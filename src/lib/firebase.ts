@@ -33,6 +33,7 @@ import type {
   CheckInRecord,
   ReminderSettings,
   TherapistReportData,
+  UserAISettings,
 } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -50,6 +51,10 @@ export const db: Firestore = (firebaseConfig as any).firestoreDatabaseId
 export const storage: FirebaseStorage = getStorage(app);
 
 const googleProvider = new GoogleAuthProvider();
+// Explicitly declare openid and userinfo scopes so that access token allows fetching profile data
+googleProvider.addScope('openid');
+googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
+googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');
 googleProvider.setCustomParameters({
   prompt: 'select_account',
 });
@@ -59,29 +64,33 @@ export const signInWithGoogle = async (): Promise<User | null> => {
     const result = await signInWithPopup(auth, googleProvider);
     // Ensure user profile document exists
     if (result.user) {
-      const userRef = doc(db, 'users', result.user.uid);
-      const userDoc = await getDoc(userRef);
-      if (!userDoc.exists()) {
-        await setDoc(
-          userRef,
-          {
-            uid: result.user.uid,
-            email: result.user.email || null,
-            displayName: result.user.displayName || 'Reflective Soul',
-            photoURL: result.user.photoURL || null,
-            createdAt: new Date().toISOString(),
-            lastLoginAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-      } else {
-        await setDoc(
-          userRef,
-          {
-            lastLoginAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
+      try {
+        const userRef = doc(db, 'users', result.user.uid);
+        const userDoc = await getDoc(userRef);
+        if (!userDoc.exists()) {
+          await setDoc(
+            userRef,
+            {
+              uid: result.user.uid,
+              email: result.user.email || null,
+              displayName: result.user.displayName || 'Reflective Soul',
+              photoURL: result.user.photoURL || null,
+              createdAt: new Date().toISOString(),
+              lastLoginAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } else {
+          await setDoc(
+            userRef,
+            {
+              lastLoginAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        }
+      } catch (dbErr) {
+        console.warn('Non-blocking: could not update user record in Firestore:', dbErr);
       }
     }
     return result.user;
@@ -501,5 +510,70 @@ export const revokeTherapistReport = async (
   if (!userId || !reportId) return;
   const reportRef = doc(db, 'users', userId, 'shared_reports', reportId);
   await setDoc(reportRef, { isRevoked: true }, { merge: true });
+};
+
+// ==========================================
+// FEATURE: BYOK AI Settings Persistence
+// ==========================================
+
+export const fetchUserAISettings = async (
+  userId: string
+): Promise<UserAISettings | null> => {
+  if (!userId) return null;
+  try {
+    const docRef = doc(db, 'users', userId, 'settings', 'ai');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        usePersonalKey: Boolean(data.usePersonalKey),
+        hasKeyConfigured: Boolean(data.hasKeyConfigured),
+        maskedKey: data.maskedKey || null,
+        encryptedKey: data.encryptedKey || null,
+        updatedAt: data.updatedAt,
+        lastTestedAt: data.lastTestedAt,
+      };
+    }
+    return {
+      usePersonalKey: false,
+      hasKeyConfigured: false,
+      maskedKey: null,
+      encryptedKey: null,
+    };
+  } catch (error) {
+    console.warn('Could not load AI settings:', error);
+    return null;
+  }
+};
+
+export const saveUserAISettings = async (
+  userId: string,
+  settings: Partial<UserAISettings>
+): Promise<void> => {
+  if (!userId) return;
+  const docRef = doc(db, 'users', userId, 'settings', 'ai');
+  const cleanData = sanitizePayload({
+    ...settings,
+    updatedAt: new Date().toISOString(),
+  });
+  await setDoc(docRef, cleanData, { merge: true });
+};
+
+export const deleteUserAISettings = async (
+  userId: string
+): Promise<void> => {
+  if (!userId) return;
+  const docRef = doc(db, 'users', userId, 'settings', 'ai');
+  await setDoc(
+    docRef,
+    {
+      usePersonalKey: false,
+      hasKeyConfigured: false,
+      maskedKey: null,
+      encryptedKey: null,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: false }
+  );
 };
 

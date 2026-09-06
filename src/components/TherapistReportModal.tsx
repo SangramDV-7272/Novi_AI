@@ -22,6 +22,7 @@ import type {
   TherapistReportData,
   ReportPeriod,
 } from '../types';
+import { getAIRequestHeadersAndBody } from '../lib/aiSettingsState';
 
 interface TherapistReportModalProps {
   isOpen: boolean;
@@ -120,6 +121,7 @@ export const TherapistReportModal: React.FC<TherapistReportModalProps> = ({
           checkIns: relevantCheckIns,
           sleepEnergyNotes,
           customNotes,
+          ...getAIRequestHeadersAndBody(),
         }),
       });
 

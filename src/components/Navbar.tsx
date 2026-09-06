@@ -1,5 +1,13 @@
 import React from 'react';
-import { Sparkles, LogOut, Plus, ShieldCheck, BookOpen, TrendingUp, Smile } from 'lucide-react';
+import {
+  Sparkles,
+  LogOut,
+  Plus,
+  ShieldCheck,
+  BookOpen,
+  TrendingUp,
+  Smile,
+} from 'lucide-react';
 import type { UserProfile } from '../types';
 
 interface NavbarProps {

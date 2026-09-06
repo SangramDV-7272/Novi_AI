@@ -18,6 +18,13 @@ import {
   HelpCircle,
   X,
   FileCheck2,
+  KeyRound,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  ShieldCheck,
+  EyeOff,
+  Sliders,
 } from 'lucide-react';
 import { signInWithGoogle } from '../lib/firebase';
 
@@ -29,6 +36,7 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<'privacy' | 'terms' | 'contact' | null>(null);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
@@ -49,7 +57,15 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
       }
 
       if (err?.code === 'auth/popup-blocked') {
-        setErrorMsg('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
+        setErrorMsg('Sign-in popup was blocked by your browser. Please enable popups for this site and try again.');
+      } else if (
+        err?.code === 'auth/invalid-credential' ||
+        err?.message?.includes('userinfo') ||
+        err?.message?.includes('auth/invalid-credential')
+      ) {
+        setErrorMsg(
+          'Google authentication could not complete the account handshake (auth/invalid-credential). This commonly occurs when third-party cookies/redirects are restricted or the authentication window timed out. Please click "Continue with Google" to try again.'
+        );
       } else {
         console.error('Sign-in failure:', err);
         setErrorMsg(
@@ -71,12 +87,12 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
     {
       icon: BrainCircuit,
       title: 'AI-Guided Reflection Dialogue',
-      description: 'Engage in multi-turn conversational exploration with compassionate, non-judgmental Gemini guidance.',
+      description: 'Engage in compassionate, multi-turn conversational exploration with Gemini models.',
     },
     {
       icon: Database,
       title: 'Auto-Summaries & History',
-      description: 'Receive synthesized core takeaways, key insights, and an organized chronological reflection timeline.',
+      description: 'Receive synthesized core takeaways, key insights, and an organized chronological timeline.',
     },
     {
       icon: MapPin,
@@ -86,7 +102,7 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
     {
       icon: Paperclip,
       title: 'Multimedia Attachments',
-      description: 'Enrich reflections with photos, audio notes, video clips, Markdown snippets, and PDF documents.',
+      description: 'Enrich reflections with photos, audio recordings, video clips, Markdown snippets, and PDFs.',
     },
     {
       icon: Mic,
@@ -96,7 +112,7 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
     {
       icon: TrendingUp,
       title: 'Insights & Mood Graphs',
-      description: 'Visualize emotional intensity, multi-period mood trajectories, and positive breakthroughs over time.',
+      description: 'Visualize emotional intensity, multi-period mood trajectories, and positive breakthroughs.',
     },
     {
       icon: Activity,
@@ -107,6 +123,39 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
       icon: ClipboardList,
       title: 'Shareable Therapist Reports',
       description: 'Generate structured clinical summaries with custom entry selection, PDF export, and access keys.',
+    },
+  ];
+
+  const faqItems = [
+    {
+      question: 'Is my journaling and reflection data private?',
+      answer:
+        'Yes, entirely. All reflections, mood check-ins, media attachments, and reports are protected by owner-isolated Firestore rules (request.auth.uid == userId). Your content is never visible to other users, never sold to advertisers, and never used to train public models.',
+    },
+    {
+      question: 'Do I need my own Gemini API key to use the app?',
+      answer:
+        'No, Mindful Reflections works immediately upon sign-in using our built-in shared AI configuration. However, if you prefer using your own Google AI Studio quota or personal billing, you can easily connect your personal key in AI Settings anytime.',
+    },
+    {
+      question: 'How is my personal Gemini API key secured if I add one?',
+      answer:
+        'Personal API keys are encrypted at rest on our backend using AES-256-GCM encryption before storing in your private settings document. Raw keys are never stored in plaintext, never exposed in client bundles, and never printed in server logs.',
+    },
+    {
+      question: 'Can I delete or export my reflections at any time?',
+      answer:
+        'Absolutely. You maintain complete data sovereignty. You can delete any journal entry, check-in, or attachment at any time, which permanently removes the file from both Firestore and Cloud Storage. You can also generate and download comprehensive therapist reports in PDF format.',
+    },
+    {
+      question: 'What happens if a Gemini model encounters an outage or rate limit?',
+      answer:
+        'The backend implements an automatic resilient fallback ladder across active Gemini models. If a rate limit or service interruption occurs, it safely cascades to an available model so your reflective session continues smoothly.',
+    },
+    {
+      question: 'Is this app a replacement for therapy or medical care?',
+      answer:
+        'No. Mindful Reflections is designed for personal mindfulness, self-inquiry, and emotional tracking. It is not psychotherapy, medical care, or crisis intervention. If you are experiencing a mental health emergency, please dial 988 or seek licensed professional support immediately.',
     },
   ];
 
@@ -132,12 +181,22 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
 
               {/* Error Message */}
               {errorMsg && (
-                <div className="mb-6 p-4 rounded-2xl bg-[#F8EFEF] border border-[#E2B6B6] text-[#7A3333] text-sm text-left flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-[#9C3838] shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Authentication Notice</p>
-                    <p className="text-xs mt-0.5 text-[#7A3333]">{errorMsg}</p>
+                <div className="mb-6 p-4 rounded-2xl bg-[#F8EFEF] border border-[#E2B6B6] text-[#7A3333] text-sm text-left flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-[#9C3838] shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Authentication Notice</p>
+                      <p className="text-xs mt-0.5 text-[#7A3333]">{errorMsg}</p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setErrorMsg(null)}
+                    className="text-[#9C3838] hover:text-[#7A3333] p-1 rounded-lg hover:bg-black/5 cursor-pointer shrink-0"
+                    title="Dismiss"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               )}
 
@@ -190,18 +249,18 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
       </div>
 
       {/* FULL FEATURES SECTION */}
-      <section className="py-12 px-4 sm:px-6 lg:px-8 bg-[#EFEEE8]/60 border-y border-[#D1CDBE]/70">
+      <section className="py-14 px-4 sm:px-6 lg:px-8 bg-[#EFEEE8]/60 border-y border-[#D1CDBE]/70">
         <div className="max-w-6xl mx-auto w-full">
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FAF9F5] border border-[#D1CDBE] text-[11px] font-semibold text-[#5A5A40] uppercase tracking-wider mb-2">
-              <Sparkles className="w-3 h-3 text-[#875F23]" />
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FAF9F5] border border-[#D1CDBE] text-[11px] font-semibold text-[#5A5A40] uppercase tracking-wider mb-3">
+              <Sparkles className="w-3.5 h-3.5 text-[#875F23]" />
               <span>Comprehensive Toolset</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#3D3C38] mb-2">
+            <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#3D3C38] mb-3">
               Everything You Need for Mindful Self-Discovery
             </h2>
             <p className="text-xs sm:text-sm text-[#7C7A70] leading-relaxed">
-              Designed from the ground up to nurture emotional clarity, habit consistency, and private reflection without noise.
+              Designed to nurture emotional clarity, habit consistency, and private reflection without noise.
             </p>
           </div>
 
@@ -238,30 +297,30 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
           <div className="bg-[#FAF9F5] rounded-3xl border border-[#D1CDBE] p-8 sm:p-12 shadow-2xs">
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EFEEE8] border border-[#D1CDBE] text-[11px] font-semibold text-[#5A5A40] uppercase tracking-wider mb-3">
-                <Heart className="w-3 h-3 text-[#875F23]" />
+                <Heart className="w-3.5 h-3.5 text-[#875F23]" />
                 <span>Our Philosophy</span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#3D3C38] mb-4">
                 About Mindful Reflections
               </h2>
               <p className="text-sm sm:text-base text-[#5E5D57] leading-relaxed mb-4">
-                Mindful Reflections is a dedicated sanctuary for quiet contemplation in a hyperconnected world. It blends traditional expressive journaling with empathetic, multi-turn AI facilitation—helping you unravel complex thoughts, discover blindspots, and observe emotional patterns with kindness.
+                Mindful Reflections is a dedicated sanctuary for quiet contemplation in a fast-paced world. It blends traditional expressive journaling with empathetic, multi-turn AI facilitation—helping you unravel complex feelings, discover blindspots, and observe emotional patterns with kindness.
               </p>
               <h3 className="text-base font-serif font-bold text-[#3D3C38] mt-6 mb-2">
                 Who It&rsquo;s Built For:
               </h3>
-              <ul className="space-y-2.5 text-xs sm:text-sm text-[#7C7A70]">
+              <ul className="space-y-3 text-xs sm:text-sm text-[#7C7A70]">
                 <li className="flex items-start gap-2.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#5A5A40] mt-2 shrink-0" />
-                  <span><strong>Mindful Thinkers & Journalers:</strong> Anyone wanting an unhurried, distraction-free space to record thoughts, voice memos, and photos.</span>
+                  <span><strong>Mindful Thinkers & Journalers:</strong> Anyone wanting an unhurried, distraction-free space to record thoughts, voice memos, photos, and location context.</span>
                 </li>
                 <li className="flex items-start gap-2.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#5A5A40] mt-2 shrink-0" />
-                  <span><strong>Therapy & Counseling Clients:</strong> Individuals who want to bring clear summaries, mood trends, and specific breakthroughs to their sessions without scrambling through messy notes.</span>
+                  <span><strong>Therapy & Counseling Clients:</strong> Individuals who want to bring clear summaries, mood trends, and specific breakthroughs to their sessions without scrambling through paper notes.</span>
                 </li>
                 <li className="flex items-start gap-2.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#5A5A40] mt-2 shrink-0" />
-                  <span><strong>Those Seeking Clarity & Grounding:</strong> People navigating life transitions, burnout, or daily anxiety who benefit from gentle breathing exercises and non-judgmental guided inquiries.</span>
+                  <span><strong>Those Seeking Emotional Grounding:</strong> People navigating life transitions, burnout, or daily anxiety who benefit from gentle breathing exercises and non-judgmental guided inquiries.</span>
                 </li>
               </ul>
             </div>
@@ -275,49 +334,124 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
           <div className="p-8 sm:p-10 rounded-3xl bg-[#FAF9F5] border border-[#CAD5C6] shadow-2xs">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 rounded-xl bg-[#5A5A40] text-white flex items-center justify-center shrink-0">
-                <Lock className="w-5 h-5" />
+                <ShieldCheck className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#3D3C38]">
-                  Privacy, Data Security & Health Advisory
+                  Privacy, Data Security & Zero-Leakage Architecture
                 </h2>
                 <p className="text-xs text-[#7C7A70]">
-                  How your private reflections and personal well-being information are guarded.
+                  Built from the foundation up with strict access isolation, encryption, and medical notices.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-[#D1CDBE]">
-              <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-[#D1CDBE]">
+              {/* Pillar 1: Isolated Storage */}
+              <div className="space-y-1.5">
                 <div className="flex items-center gap-2 text-sm font-semibold text-[#3D3C38]">
-                  <Shield className="w-4 h-4 text-[#5A5A40]" />
-                  <span>Owner-Isolated Firestore</span>
+                  <Database className="w-4 h-4 text-[#5A5A40]" />
+                  <span>Owner-Isolated Firestore & Storage</span>
                 </div>
                 <p className="text-xs text-[#7C7A70] leading-relaxed">
-                  Every reflection, check-in, and report snapshot is stored under <code className="bg-[#EFEEE8] px-1 py-0.5 rounded text-[11px] text-[#3D3C38]">/users/{'{userId}'}</code>. Strict security rules forbid any cross-user reads or public exposure.
+                  Every reflection, check-in, media attachment, and report is strictly partitioned under <code className="bg-[#EFEEE8] px-1 py-0.5 rounded text-[11px] text-[#3D3C38]">/users/{'{userId}'}</code>. Firestore security rules enforce that only the matching authenticated user can read or write data.
                 </p>
               </div>
 
-              <div className="space-y-2">
+              {/* Pillar 2: Google Sign-In */}
+              <div className="space-y-1.5">
                 <div className="flex items-center gap-2 text-sm font-semibold text-[#3D3C38]">
                   <FileCheck2 className="w-4 h-4 text-[#5A5A40]" />
-                  <span>Google Sign-In Only</span>
+                  <span>Google Sign-In Only (No Passwords)</span>
                 </div>
                 <p className="text-xs text-[#7C7A70] leading-relaxed">
-                  We never ask for or store passwords. Authentication is handled directly through Google&rsquo;s OAuth 2.0 protocol with encrypted identity tokens and state isolation.
+                  We never ask for or store passwords. Authentication is handled securely through Google&rsquo;s OAuth 2.0 protocol with cryptographic token validation and zero plaintext credential storage.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#875F23]">
-                  <AlertCircle className="w-4 h-4 text-[#875F23]" />
-                  <span>Wellness & Medical Notice</span>
+              {/* Pillar 3: BYOK Encryption */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#3D3C38]">
+                  <KeyRound className="w-4 h-4 text-[#5A5A40]" />
+                  <span>Optional BYOK Key with AES-256-GCM</span>
                 </div>
                 <p className="text-xs text-[#7C7A70] leading-relaxed">
-                  Mindful Reflections and its Gemini AI features are designed purely for self-reflection and personal growth. They do not constitute psychotherapy, medical advice, or psychiatric treatment.
+                  Bring your own Gemini API key anytime. Keys are validated and encrypted at rest on the backend using AES-256-GCM. Plaintext keys are never stored, never written to server logs, and never returned to the browser.
+                </p>
+              </div>
+
+              {/* Pillar 4: Zero Advertising */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[#3D3C38]">
+                  <EyeOff className="w-4 h-4 text-[#5A5A40]" />
+                  <span>Zero Data Selling or Ad Tracking</span>
+                </div>
+                <p className="text-xs text-[#7C7A70] leading-relaxed">
+                  Your emotional check-ins, journal entries, and private dialogue are yours alone. We do not sell data to data brokers, do not run behavioral advertising, and do not track you across third-party websites.
                 </p>
               </div>
             </div>
+
+            {/* Medical Disclaimer Sub-banner */}
+            <div className="mt-6 p-4 rounded-2xl bg-[#F5F5F0] border border-[#D1CDBE] flex items-start gap-3 text-xs text-[#5E5D57]">
+              <AlertCircle className="w-4 h-4 text-[#875F23] shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <strong className="text-[#3D3C38]">Wellness & Medical Notice:</strong> Mindful Reflections and its Gemini AI tools are designed for self-discovery and personal mindfulness. They do not substitute for clinical mental health therapy, diagnostic assessments, or emergency psychiatric interventions.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* KEY INFO & FAQ ACCORDION SECTION */}
+      <section className="pb-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto w-full">
+          <div className="text-center max-w-2xl mx-auto mb-8">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EFEEE8] border border-[#D1CDBE] text-[11px] font-semibold text-[#5A5A40] uppercase tracking-wider mb-2">
+              <HelpCircle className="w-3.5 h-3.5 text-[#5A5A40]" />
+              <span>Got Questions?</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#3D3C38] mb-2">
+              Frequently Asked Questions & Key Info
+            </h2>
+            <p className="text-xs sm:text-sm text-[#7C7A70]">
+              Clear answers regarding privacy, data ownership, AI capabilities, and features.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {faqItems.map((faq, index) => {
+              const isOpen = openFaqIndex === index;
+              return (
+                <div
+                  key={index}
+                  className="rounded-2xl border border-[#D1CDBE] bg-[#FAF9F5] overflow-hidden transition-all shadow-2xs"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                    className="w-full text-left p-5 flex items-center justify-between gap-4 cursor-pointer hover:bg-[#F5F5F0]/60 transition-colors"
+                  >
+                    <span className="font-serif font-bold text-sm sm:text-base text-[#3D3C38]">
+                      {faq.question}
+                    </span>
+                    <div className="w-7 h-7 rounded-full bg-[#EFEEE8] flex items-center justify-center shrink-0 text-[#5A5A40]">
+                      {isOpen ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="px-5 pb-5 pt-1 text-xs sm:text-sm text-[#5E5D57] leading-relaxed border-t border-[#EAE8DD] animate-in fade-in duration-200">
+                      <p>{faq.answer}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -386,6 +520,9 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({ onLoginSuccess }) => {
                   </p>
                   <p>
                     <strong>AI Data Processing:</strong> Conversations with Gemini are transmitted securely via backend proxy routes solely for the duration of generating your reflection responses and summaries.
+                  </p>
+                  <p>
+                    <strong>BYOK Protection:</strong> If you provide your personal Gemini key, it is encrypted using AES-256-GCM and stored only within your private settings document.
                   </p>
                   <p>
                     <strong>Third-Party Sharing:</strong> We do not sell, rent, or trade your personal journal records or emotional check-in history to advertisers or third parties.

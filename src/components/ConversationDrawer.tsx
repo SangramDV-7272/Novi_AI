@@ -14,6 +14,7 @@ import {
   Check,
 } from 'lucide-react';
 import type { ChatMessage, JournalEntry, GeminiChatResponse, GeminiSummaryResponse } from '../types';
+import { getAIRequestHeadersAndBody } from '../lib/aiSettingsState';
 
 interface ConversationDrawerProps {
   entry: JournalEntry;
@@ -79,6 +80,7 @@ export const ConversationDrawer: React.FC<ConversationDrawerProps> = ({
           category: entry.category,
           mood: entry.mood,
           title: entry.title,
+          ...getAIRequestHeadersAndBody(),
         }),
       });
 
@@ -128,6 +130,7 @@ export const ConversationDrawer: React.FC<ConversationDrawerProps> = ({
           text: entry.initialText,
           messages: messages,
           category: entry.category,
+          ...getAIRequestHeadersAndBody(),
         }),
       });
 

@@ -27,6 +27,7 @@ import { LocationPickerModal } from './LocationPickerModal';
 import { VoiceDictationModal } from './VoiceDictationModal';
 import { MediaViewerModal } from './MediaViewerModal';
 import { uploadAttachmentFile, deleteAttachmentFile } from '../lib/firebase';
+import { getAIRequestHeadersAndBody } from '../lib/aiSettingsState';
 import type {
   JournalEntry,
   ReflectionCategory,
@@ -124,7 +125,11 @@ export const EntryEditor: React.FC<EntryEditorProps> = ({
       const res = await fetch('/api/gemini/prompts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, currentMood: mood }),
+        body: JSON.stringify({
+          category,
+          currentMood: mood,
+          ...getAIRequestHeadersAndBody(),
+        }),
       });
       const data = await res.json();
       if (Array.isArray(data.prompts)) {

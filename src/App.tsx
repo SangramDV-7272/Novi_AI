@@ -29,6 +29,7 @@ import { RemindersSettingsModal } from './components/RemindersSettingsModal';
 import { TherapistReportModal } from './components/TherapistReportModal';
 import { BreathingExerciseModal } from './components/BreathingExerciseModal';
 import { SharedReportViewer } from './components/SharedReportViewer';
+import { AISettingsModal } from './components/AISettingsModal';
 import {
   subscribeToAuth,
   signOutUser,
@@ -44,7 +45,9 @@ import {
   saveTherapistReport,
   deleteTherapistReport,
   revokeTherapistReport,
+  fetchUserAISettings,
 } from './lib/firebase';
+import { setGlobalAISettings } from './lib/aiSettingsState';
 import type {
   UserProfile,
   JournalEntry,
@@ -52,6 +55,7 @@ import type {
   CheckInRecord,
   ReminderSettings,
   TherapistReportData,
+  UserAISettings,
 } from './types';
 
 export default function App() {
@@ -81,6 +85,9 @@ export default function App() {
   // Feature 6: Therapist Reports
   const [savedReports, setSavedReports] = useState<TherapistReportData[]>([]);
 
+  // Bring Your Own Key (BYOK) AI Settings State
+  const [aiSettings, setAISettings] = useState<UserAISettings | null>(null);
+
   // Modals state
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
   const [editingCheckIn, setEditingCheckIn] = useState<CheckInRecord | null>(null);
@@ -88,6 +95,7 @@ export default function App() {
   const [isRemindersModalOpen, setIsRemindersModalOpen] = useState(false);
   const [isTherapistReportModalOpen, setIsTherapistReportModalOpen] = useState(false);
   const [isBreathingModalOpen, setIsBreathingModalOpen] = useState(false);
+  const [isAISettingsModalOpen, setIsAISettingsModalOpen] = useState(false);
 
   // Active reflection view states
   const [isCreatingNew, setIsCreatingNew] = useState(false);
@@ -115,6 +123,8 @@ export default function App() {
         setEntries([]);
         setCheckIns([]);
         setSavedReports([]);
+        setAISettings(null);
+        setGlobalAISettings(null);
       }
       setAuthLoading(false);
     });
@@ -127,16 +137,19 @@ export default function App() {
     setEntriesLoading(true);
     setErrorBanner(null);
     try {
-      const [entriesData, checkInsData, remSettings, reportsData] = await Promise.all([
+      const [entriesData, checkInsData, remSettings, reportsData, userAISettings] = await Promise.all([
         fetchUserEntries(userId),
         fetchUserCheckIns(userId),
         fetchUserReminderSettings(userId),
         fetchUserTherapistReports(userId),
+        fetchUserAISettings(userId),
       ]);
       setEntries(entriesData);
       setCheckIns(checkInsData);
       setReminderSettings(remSettings);
       setSavedReports(reportsData);
+      setAISettings(userAISettings);
+      setGlobalAISettings(userAISettings);
     } catch (err: any) {
       console.error('Failed to load user data from Firestore:', err);
       setErrorBanner('Could not load your saved reflections. Please refresh or try again.');
@@ -529,6 +542,9 @@ export default function App() {
                     onSearchChange={setSearchQuery}
                     selectedCategory={selectedCategory}
                     onCategoryChange={setSelectedCategory}
+                    onOpenAISettings={() => setIsAISettingsModalOpen(true)}
+                    isUsingPersonalKey={Boolean(aiSettings?.usePersonalKey && aiSettings?.hasKeyConfigured)}
+                    maskedKey={aiSettings?.maskedKey}
                   />
 
                   {/* History Section Header */}
@@ -707,6 +723,17 @@ export default function App() {
         <BreathingExerciseModal
           isOpen={isBreathingModalOpen}
           onClose={() => setIsBreathingModalOpen(false)}
+        />
+      )}
+
+      {/* Bring Your Own Key (BYOK) AI Settings Modal */}
+      {isAISettingsModalOpen && user && (
+        <AISettingsModal
+          isOpen={isAISettingsModalOpen}
+          onClose={() => setIsAISettingsModalOpen(false)}
+          user={user}
+          aiSettings={aiSettings}
+          onSettingsUpdated={(updated) => setAISettings(updated)}
         />
       )}
     </div>

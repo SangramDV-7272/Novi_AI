@@ -42,6 +42,7 @@ import type {
   InsightsAnalysisResult,
   CheckInMood,
 } from '../types';
+import { getAIRequestHeadersAndBody } from '../lib/aiSettingsState';
 
 interface InsightsSectionProps {
   entries: JournalEntry[];
@@ -166,6 +167,7 @@ export const InsightsSection: React.FC<InsightsSectionProps> = ({
           entries: filteredData.entries,
           checkIns: filteredData.checkIns,
           dateRange: dateFilter,
+          ...getAIRequestHeadersAndBody(),
         }),
       });
 

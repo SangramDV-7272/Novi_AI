@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, Square, RefreshCw, Check, X, Sparkles, AlertCircle, Volume2 } from 'lucide-react';
+import { getAIRequestHeadersAndBody } from '../lib/aiSettingsState';
 
 interface VoiceDictationModalProps {
   category?: string;
@@ -177,6 +178,7 @@ export const VoiceDictationModal: React.FC<VoiceDictationModalProps> = ({
           liveTranscript,
           category,
           mood,
+          ...getAIRequestHeadersAndBody(),
         }),
       });
 

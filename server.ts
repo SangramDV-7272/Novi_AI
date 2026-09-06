@@ -32,13 +32,123 @@ const MODEL_FALLBACK_LADDER = [
   'gemini-flash-latest',
 ];
 
-// Helper to execute generation with automatic model fallback
+// =======================================================
+// AES-256-GCM Secure Encryption & Decryption for BYOK
+// =======================================================
+const ENCRYPTION_SECRET =
+  process.env.ENCRYPTION_SECRET ||
+  process.env.GEMINI_API_KEY ||
+  'mindful-reflections-secure-vault-salt-2026';
+const DERIVED_KEY = crypto.createHash('sha256').update(ENCRYPTION_SECRET).digest();
+
+interface EncryptedPayload {
+  ciphertext: string;
+  iv: string;
+  tag: string;
+}
+
+function encryptApiKey(rawKey: string): { encrypted: EncryptedPayload; maskedKey: string } {
+  const trimmed = rawKey.trim();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', DERIVED_KEY, iv);
+  let encrypted = cipher.update(trimmed, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const tag = cipher.getAuthTag().toString('hex');
+
+  const last4 = trimmed.length >= 4 ? trimmed.slice(-4) : trimmed;
+  const maskedKey = '••••••••••••' + last4;
+
+  return {
+    encrypted: {
+      ciphertext: encrypted,
+      iv: iv.toString('hex'),
+      tag,
+    },
+    maskedKey,
+  };
+}
+
+function decryptApiKey(payload?: any): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const { ciphertext, iv, tag } = payload;
+  if (!ciphertext || !iv || !tag) return null;
+
+  try {
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      DERIVED_KEY,
+      Buffer.from(iv, 'hex')
+    );
+    decipher.setAuthTag(Buffer.from(tag, 'hex'));
+    let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (err) {
+    console.error('Failed to decrypt user personal key:', err);
+    return null;
+  }
+}
+
+function extractCustomKeyFromRequest(req: Request): string | null {
+  const { usePersonalKey, encryptedKey } = req.body || {};
+  if (!usePersonalKey || !encryptedKey) {
+    return null;
+  }
+  return decryptApiKey(encryptedKey);
+}
+
+// Helper to execute generation with automatic model fallback and BYOK personal key support
 async function generateContentWithFallback(params: {
   contents: any;
   config?: any;
-}): Promise<{ text: string; modelUsed: string }> {
-  const ai = getAIClient();
-  if (!ai) {
+  customKey?: string | null;
+}): Promise<{ text: string; modelUsed: string; usedPersonalKey?: boolean; fallbackNotice?: string }> {
+  let personalAI: GoogleGenAI | null = null;
+  let isPersonalKeyProvided = false;
+
+  if (params.customKey && typeof params.customKey === 'string' && params.customKey.trim().length > 10) {
+    try {
+      personalAI = new GoogleGenAI({ apiKey: params.customKey.trim() });
+      isPersonalKeyProvided = true;
+    } catch (e) {
+      console.warn('Could not initialize personal Gemini client, falling back to default:', e);
+    }
+  }
+
+  // 1. If user provided a personal key, try running with personal key first
+  if (personalAI && isPersonalKeyProvided) {
+    for (const model of MODEL_FALLBACK_LADDER) {
+      try {
+        const response = await personalAI.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+
+        const responseText = response.text || '';
+        if (responseText) {
+          return { text: responseText, modelUsed: model, usedPersonalKey: true };
+        }
+      } catch (error: any) {
+        console.warn(`Attempt with personal key on "${model}" failed:`, error?.message || error);
+        // Continue to try other models in ladder if quota or transient error
+        const statusCode = error?.status || error?.statusCode || 0;
+        if (
+          [404, 429, 500, 503].includes(statusCode) ||
+          error?.message?.includes('not found') ||
+          error?.message?.includes('quota') ||
+          error?.message?.includes('RESOURCE_EXHAUSTED')
+        ) {
+          continue;
+        }
+      }
+    }
+    console.warn('Personal key exhausted quota or encountered error. Gracefully falling back to app default key.');
+  }
+
+  // 2. Fallback to app default key
+  const defaultAI = getAIClient();
+  if (!defaultAI) {
     throw new Error('GEMINI_API_KEY is not configured in server environment.');
   }
 
@@ -46,7 +156,7 @@ async function generateContentWithFallback(params: {
 
   for (const model of MODEL_FALLBACK_LADDER) {
     try {
-      const response = await ai.models.generateContent({
+      const response = await defaultAI.models.generateContent({
         model,
         contents: params.contents,
         config: params.config,
@@ -54,17 +164,22 @@ async function generateContentWithFallback(params: {
 
       const responseText = response.text || '';
       if (responseText) {
-        return { text: responseText, modelUsed: model };
+        return {
+          text: responseText,
+          modelUsed: model,
+          usedPersonalKey: false,
+          fallbackNotice: isPersonalKeyProvided
+            ? 'Personal key rate limit or error occurred; safely used application default key.'
+            : undefined,
+        };
       }
     } catch (error: any) {
       console.warn(`Attempt with model "${model}" failed:`, error?.message || error);
       lastError = error;
-      // If error is recoverable (rate limit, unavailable, etc.), continue to next model in ladder
       const statusCode = error?.status || error?.statusCode || 0;
       if ([404, 429, 500, 503].includes(statusCode) || error?.message?.includes('not found') || error?.message?.includes('quota')) {
         continue;
       }
-      // If client key error or forbidden, throw immediately
       if (statusCode === 401 || statusCode === 403) {
         throw error;
       }
@@ -73,6 +188,86 @@ async function generateContentWithFallback(params: {
 
   throw lastError || new Error('All fallback models failed to generate a response.');
 }
+
+// =======================================================
+// BYOK Key Validation & Encryption Endpoints
+// =======================================================
+
+// Validate an entered Gemini API Key with a lightweight request
+app.post('/api/settings/ai-key/test', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { apiKey, encryptedKey } = req.body;
+    let keyToTest = '';
+
+    if (apiKey && typeof apiKey === 'string') {
+      keyToTest = apiKey.trim();
+    } else if (encryptedKey) {
+      const decrypted = decryptApiKey(encryptedKey);
+      if (decrypted) keyToTest = decrypted;
+    }
+
+    if (!keyToTest || keyToTest.length < 10) {
+      res.status(400).json({ success: false, error: 'Please enter a valid Gemini API key.' });
+      return;
+    }
+
+    const testAI = new GoogleGenAI({ apiKey: keyToTest });
+    const response = await testAI.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: 'Ping: reply with "OK".',
+      config: { maxOutputTokens: 5 },
+    });
+
+    if (response && response.text) {
+      res.json({
+        success: true,
+        message: 'Personal Gemini API key validated successfully!',
+      });
+      return;
+    }
+
+    res.status(400).json({
+      success: false,
+      error: 'Key validation call did not return a response.',
+    });
+  } catch (error: any) {
+    console.warn('API key test error:', error?.message || error);
+    const msg = String(error?.message || '');
+    let friendlyError = 'Failed to validate API key with Google AI Studio.';
+    if (msg.includes('API_KEY_INVALID') || msg.includes('403') || msg.includes('400')) {
+      friendlyError = 'Invalid Gemini API key. Please check that you copied the complete key from Google AI Studio.';
+    } else if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) {
+      friendlyError = 'API key quota or rate limit exceeded for this key in Google AI Studio.';
+    } else if (msg.includes('404')) {
+      friendlyError = 'Model service not found for this API key project.';
+    } else {
+      friendlyError = msg.length < 150 ? msg : 'Unable to connect with the provided key.';
+    }
+    res.status(400).json({
+      success: false,
+      error: friendlyError,
+    });
+  }
+});
+
+// Securely encrypt key using AES-256-GCM and return ciphertext + masked string
+app.post('/api/settings/ai-key/encrypt', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { apiKey } = req.body;
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
+      res.status(400).json({ error: 'Please provide a valid API key string.' });
+      return;
+    }
+    const result = encryptApiKey(apiKey);
+    res.json({
+      success: true,
+      encryptedKey: result.encrypted,
+      maskedKey: result.maskedKey,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to securely encrypt API key.' });
+  }
+});
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -124,6 +319,7 @@ Guidelines:
       parts: [{ text: String(m.content || '').trim() }],
     }));
 
+    const customKey = extractCustomKeyFromRequest(req);
     const result = await generateContentWithFallback({
       contents,
       config: {
@@ -131,11 +327,14 @@ Guidelines:
         temperature: 0.75,
         maxOutputTokens: 1024,
       },
+      customKey,
     });
 
     res.json({
       reply: result.text,
       modelUsed: result.modelUsed,
+      usedPersonalKey: result.usedPersonalKey,
+      fallbackNotice: result.fallbackNotice,
     });
   } catch (error: any) {
     console.error('Error in /api/gemini/chat:', error);
@@ -197,12 +396,14 @@ Respond ONLY in valid JSON matching this exact structure:
   "suggestedAction": "One small mindful micro-action or reflection question."
 }`;
 
+    const customKey = extractCustomKeyFromRequest(req);
     const result = await generateContentWithFallback({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
         temperature: 0.3,
       },
+      customKey,
     });
 
     let parsed: any;
@@ -226,6 +427,8 @@ Respond ONLY in valid JSON matching this exact structure:
       detectedMood: parsed.detectedMood || 'thoughtful',
       suggestedAction: parsed.suggestedAction || '',
       modelUsed: result.modelUsed,
+      usedPersonalKey: result.usedPersonalKey,
+      fallbackNotice: result.fallbackNotice,
     });
   } catch (error: any) {
     console.error('Error in /api/gemini/summarize:', error);
@@ -255,12 +458,14 @@ app.post('/api/gemini/prompts', async (req: Request, res: Response): Promise<voi
     const promptText = `Generate 3 compelling, thoughtful, and psychologically resonant journaling prompts for someone doing a "${category || 'Daily Reflection'}" who is feeling "${currentMood || 'reflective'}".
 Keep each prompt under 25 words. Return ONLY a JSON array of strings, e.g. ["Prompt 1", "Prompt 2", "Prompt 3"].`;
 
+    const customKey = extractCustomKeyFromRequest(req);
     const result = await generateContentWithFallback({
       contents: [{ role: 'user', parts: [{ text: promptText }] }],
       config: {
         responseMimeType: 'application/json',
         temperature: 0.8,
       },
+      customKey,
     });
 
     let prompts: string[] = [];
@@ -451,12 +656,14 @@ Instructions:
 
     parts.push({ text: prompt });
 
+    const customKey = extractCustomKeyFromRequest(req);
     const result = await generateContentWithFallback({
       contents: [{ role: 'user', parts }],
       config: {
         responseMimeType: 'application/json',
         temperature: 0.35,
       },
+      customKey,
     });
 
     let parsed: any;
@@ -474,6 +681,8 @@ Instructions:
       rawTranscript: parsed.rawTranscript || liveTranscript || '',
       structuredText: parsed.structuredText || result.text,
       modelUsed: result.modelUsed,
+      usedPersonalKey: result.usedPersonalKey,
+      fallbackNotice: result.fallbackNotice,
     });
   } catch (error: any) {
     console.error('Error in /api/gemini/voice-structure:', error);
@@ -646,12 +855,14 @@ Instructions:
   "aiSummary": "string"
 }`;
 
+    const customKey = extractCustomKeyFromRequest(req);
     const result = await generateContentWithFallback({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
         temperature: 0.4,
       },
+      customKey,
     });
 
     let parsed: any;
@@ -683,6 +894,8 @@ Instructions:
       generatedAt: new Date().toISOString(),
       disclaimer: DISCLAIMER_NOTE,
       modelUsed: result.modelUsed,
+      usedPersonalKey: result.usedPersonalKey,
+      fallbackNotice: result.fallbackNotice,
     });
   } catch (error: any) {
     console.error('Error in /api/insights/analyze:', error);
@@ -815,12 +1028,14 @@ Generate a concise, professional report matching this exact JSON format:
   "discussionPrompts": ["3-4 collaborative questions or prompts for the upcoming therapy session"]
 }`;
 
+    const customKey = extractCustomKeyFromRequest(req);
     const result = await generateContentWithFallback({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
         temperature: 0.35,
       },
+      customKey,
     });
 
     let parsed: any;
@@ -857,6 +1072,8 @@ Generate a concise, professional report matching this exact JSON format:
       customClinicianNotes: customNotes,
       disclaimer: REPORT_DISCLAIMER,
       modelUsed: result.modelUsed,
+      usedPersonalKey: result.usedPersonalKey,
+      fallbackNotice: result.fallbackNotice,
     });
   } catch (error: any) {
     console.error('Error in /api/reports/generate:', error);
@@ -1003,13 +1220,33 @@ app.post('/api/reports/revoke', (req: Request, res: Response): void => {
 
 // Initialize Vite server or static file serving
 async function startServer() {
+  let viteMiddleware: ((req: any, res: any, next: any) => void) | null = null;
+  let isViteReady = false;
+
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      if (isViteReady && viteMiddleware) {
+        return viteMiddleware(req, res, next);
+      }
+      // Wait for Vite to be ready
+      const checkInterval = setInterval(() => {
+        if (isViteReady && viteMiddleware) {
+          clearInterval(checkInterval);
+          viteMiddleware(req, res, next);
+        }
+      }, 50);
+
+      // Timeout safety after 15s
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        if (!res.headersSent) {
+          next();
+        }
+      }, 15000);
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -1018,9 +1255,26 @@ async function startServer() {
     });
   }
 
+  // Bind port 3000 immediately so container ingress & health probes connect without delay
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`✨ Mindful Reflections server active on http://0.0.0.0:${PORT}`);
   });
+
+  // Initialize Vite in the background if in development
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      viteMiddleware = vite.middlewares;
+      isViteReady = true;
+      console.log('⚡ Vite dev middleware initialized successfully.');
+    } catch (err) {
+      console.error('Failed to initialize Vite dev server:', err);
+    }
+  }
 }
 
 startServer();

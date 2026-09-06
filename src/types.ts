@@ -208,3 +208,19 @@ export interface TherapistReportData {
   disclaimer: string;
 }
 
+// FEATURE: Bring Your Own Key (BYOK) - AI Settings Types
+export interface EncryptedKeyPayload {
+  ciphertext: string;
+  iv: string;
+  tag: string;
+}
+
+export interface UserAISettings {
+  usePersonalKey: boolean;
+  hasKeyConfigured: boolean;
+  maskedKey: string | null;
+  encryptedKey?: EncryptedKeyPayload | null;
+  updatedAt?: string;
+  lastTestedAt?: string;
+}
+

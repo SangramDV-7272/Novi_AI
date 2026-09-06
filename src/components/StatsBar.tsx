@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Sparkles, Heart, Zap, Search, Filter } from 'lucide-react';
+import { BookOpen, Sparkles, Heart, Zap, Search, Filter, Sliders, Key } from 'lucide-react';
 import type { JournalEntry, ReflectionCategory } from '../types';
 
 interface StatsBarProps {
@@ -8,6 +8,9 @@ interface StatsBarProps {
   onSearchChange: (q: string) => void;
   selectedCategory: string;
   onCategoryChange: (cat: string) => void;
+  onOpenAISettings?: () => void;
+  isUsingPersonalKey?: boolean;
+  maskedKey?: string;
 }
 
 export const StatsBar: React.FC<StatsBarProps> = ({
@@ -16,6 +19,9 @@ export const StatsBar: React.FC<StatsBarProps> = ({
   onSearchChange,
   selectedCategory,
   onCategoryChange,
+  onOpenAISettings,
+  isUsingPersonalKey,
+  maskedKey,
 }) => {
   const totalEntries = entries.length;
   const aiConversationsCount = entries.filter((e) => e.messages && e.messages.length > 0).length;
@@ -56,13 +62,58 @@ export const StatsBar: React.FC<StatsBarProps> = ({
           </div>
         </div>
 
-        <div className="bg-[#FAF9F5] p-4 rounded-xl border border-[#D1CDBE] shadow-2xs">
-          <span className="text-[11px] font-semibold text-[#7C7A70] uppercase tracking-wider block mb-1 font-sans">
-            Active Engine
-          </span>
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-[#875F23]" />
-            <span className="text-sm font-semibold text-[#3D3C38]">Gemini 3.6 Flash</span>
+        {/* 4th Card: Active Engine & AI Settings */}
+        <div
+          id="active-engine-card"
+          className="bg-[#FAF9F5] p-4 rounded-xl border border-[#D1CDBE] hover:border-[#5A5A40] transition-colors shadow-2xs flex flex-col justify-between"
+        >
+          <div className="flex items-center justify-between gap-1 mb-1">
+            <span className="text-[11px] font-semibold text-[#7C7A70] uppercase tracking-wider block font-sans">
+              Active Engine
+            </span>
+            {onOpenAISettings && (
+              <button
+                id="active-engine-settings-trigger-btn"
+                type="button"
+                onClick={onOpenAISettings}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-[#5A5A40] hover:text-[#3D3C38] hover:underline cursor-pointer transition-colors"
+                title="Open AI Engine & API Key Settings"
+              >
+                <Sliders className="w-3 h-3 text-[#5A5A40]" />
+                <span className="font-semibold">Settings</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 my-0.5">
+            <Zap className="w-4 h-4 text-[#875F23] shrink-0" />
+            <span className="text-sm font-semibold text-[#3D3C38]">Gemini 3.8 Flash</span>
+          </div>
+
+          <div className="mt-1.5 pt-1.5 border-t border-[#EAE8DD] flex items-center justify-between gap-2 text-[11px]">
+            {isUsingPersonalKey ? (
+              <span className="inline-flex items-center gap-1.5 font-medium text-[#7A5418]">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                <span className="truncate max-w-[95px] sm:max-w-none">
+                  BYOK Key {maskedKey ? `(${maskedKey.slice(-4)})` : 'Active'}
+                </span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[#7C7A70]">
+                <Key className="w-3 h-3 text-[#7C7A70]" />
+                <span>Shared App Key</span>
+              </span>
+            )}
+
+            {onOpenAISettings && (
+              <button
+                type="button"
+                onClick={onOpenAISettings}
+                className="text-[10px] font-bold text-[#875F23] hover:text-[#5A5A40] uppercase tracking-wider cursor-pointer"
+              >
+                {isUsingPersonalKey ? 'Change' : 'Config'}
+              </button>
+            )}
           </div>
         </div>
       </div>
