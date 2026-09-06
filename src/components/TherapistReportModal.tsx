@@ -72,6 +72,7 @@ export const TherapistReportModal: React.FC<TherapistReportModalProps> = ({
   const [createdShareUrl, setCreatedShareUrl] = useState<string | null>(null);
   const [isSharing, setIsSharing] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [confirmingDeleteReportId, setConfirmingDeleteReportId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -912,17 +913,37 @@ export const TherapistReportModal: React.FC<TherapistReportModalProps> = ({
                         </button>
                       )}
                       {onDeleteReport && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (window.confirm('Delete this saved report?')) {
-                              onDeleteReport(r.id);
-                            }
-                          }}
-                          className="p-1.5 rounded-lg text-[#7C7A70] hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        confirmingDeleteReportId === r.id ? (
+                          <div className="flex items-center gap-1 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md">
+                            <span className="text-[10px] font-semibold text-red-700">Delete?</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmingDeleteReportId(null);
+                                onDeleteReport(r.id);
+                              }}
+                              className="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold cursor-pointer"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmingDeleteReportId(null)}
+                              className="px-1.5 py-0.5 bg-stone-100 text-stone-600 rounded text-[10px] cursor-pointer"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingDeleteReportId(r.id)}
+                            className="p-1.5 rounded-lg text-[#7C7A70] hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                            title="Delete report"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )
                       )}
                     </div>
                   </div>

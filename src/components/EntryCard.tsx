@@ -15,6 +15,7 @@ import {
   FileText,
   Film,
   Image as ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import type { JournalEntry, MoodType, MediaAttachment } from '../types';
 import { InteractiveMapModal } from './InteractiveMapModal';
@@ -24,6 +25,7 @@ interface EntryCardProps {
   onSelect: (entry: JournalEntry) => void;
   onOpenChat: (entry: JournalEntry) => void;
   onDelete: (entryId: string, attachments?: MediaAttachment[]) => void;
+  isDeleting?: boolean;
 }
 
 const MOOD_MAP: Record<
@@ -43,8 +45,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   onSelect,
   onOpenChat,
   onDelete,
+  isDeleting = false,
 }) => {
   const [showMapModal, setShowMapModal] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
   const moodConfig = MOOD_MAP[entry.mood] || MOOD_MAP.thoughtful;
   const MoodIcon = moodConfig.icon;
@@ -178,17 +182,54 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             >
               <Eye className="w-3.5 h-3.5" />
             </button>
-            <button
-              onClick={() => {
-                if (window.confirm('Are you sure you want to delete this reflection and any associated media?')) {
-                  onDelete(entry.id, entry.attachments);
-                }
-              }}
-              title="Delete Entry"
-              className="p-1.5 text-[#7C7A70] hover:text-[#9C3838] hover:bg-[#F8EFEF] rounded-md transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+
+            {isConfirmingDelete ? (
+              <div className="flex items-center gap-1 bg-[#F9EFEF] border border-[#E8CFCF] px-1.5 py-0.5 rounded-md animate-in fade-in zoom-in-95 duration-100">
+                <span className="text-[10px] font-semibold text-[#8A4A4A]">Delete?</span>
+                <button
+                  id={`confirm-delete-${entry.id}`}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsConfirmingDelete(false);
+                    onDelete(entry.id, entry.attachments);
+                  }}
+                  className="px-1.5 py-0.5 bg-[#9C3838] hover:bg-[#852C2C] text-white text-[10px] font-bold rounded transition-colors cursor-pointer"
+                  title="Confirm delete reflection"
+                >
+                  Yes
+                </button>
+                <button
+                  id={`cancel-delete-${entry.id}`}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsConfirmingDelete(false);
+                  }}
+                  className="px-1.5 py-0.5 bg-[#EFEEE8] hover:bg-[#E5E2D9] text-[#5E5D57] text-[10px] font-medium rounded transition-colors cursor-pointer"
+                  title="Cancel deletion"
+                >
+                  No
+                </button>
+              </div>
+            ) : isDeleting ? (
+              <div className="flex items-center gap-1 text-[#9C3838] bg-[#F9EFEF] border border-[#E8CFCF] px-2 py-1 rounded-md">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span className="text-[10px] font-medium">Deleting...</span>
+              </div>
+            ) : (
+              <button
+                id={`delete-entry-btn-${entry.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsConfirmingDelete(true);
+                }}
+                title="Delete Entry"
+                className="p-1.5 text-[#7C7A70] hover:text-[#9C3838] hover:bg-[#F8EFEF] rounded-md transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>

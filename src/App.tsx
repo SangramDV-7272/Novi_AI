@@ -14,6 +14,8 @@ import {
   Smile,
   Bell,
   X,
+  Check,
+  FlaskConical,
 } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { AuthLanding } from './components/AuthLanding';
@@ -36,6 +38,7 @@ import {
   fetchUserEntries,
   saveJournalEntry,
   deleteEntryFromFirestore,
+  setSimulateDeleteFailure,
   fetchUserCheckIns,
   saveUserCheckIn,
   deleteUserCheckIn,
@@ -58,12 +61,26 @@ import type {
   UserAISettings,
 } from './types';
 
+interface DeleteErrorState {
+  entryId: string;
+  entryTitle: string;
+  attachments?: MediaAttachment[];
+  errorMessage: string;
+}
+
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
+  // Delete reflection error & diagnostic states
+  const [deleteError, setDeleteError] = useState<DeleteErrorState | null>(null);
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
+  const [deleteSuccessToast, setDeleteSuccessToast] = useState<string | null>(null);
+  const [simulateNetworkError, setSimulateNetworkError] = useState(false);
+  const [showDiagnosticsPanel, setShowDiagnosticsPanel] = useState(false);
 
   // Shared report token from query string (?sharedReport=token)
   const [sharedReportToken, setSharedReportToken] = useState<string | null>(() => {
@@ -255,17 +272,105 @@ export default function App() {
     }
   };
 
-  // Delete reflection handler
+  // Delete reflection handler with immediate UI update, optimistic rollback, and clear retry error toast
   const handleDeleteEntry = async (entryId: string, attachments?: MediaAttachment[]) => {
-    if (!user?.uid) return;
+    if (!user?.uid) {
+      setDeleteError({
+        entryId,
+        entryTitle: 'Reflection',
+        attachments,
+        errorMessage: 'Authentication required. Please sign in to delete reflections.',
+      });
+      return;
+    }
+
+    const targetEntry = entries.find((e) => e.id === entryId);
+    const entryTitle = targetEntry?.title || 'Reflection';
+
+    // Clear prior error and success states
+    setDeleteError(null);
+    setDeleteSuccessToast(null);
+    setDeletingEntryId(entryId);
+
+    // Snapshot current state for rollback if deletion fails
+    const previousEntries = [...entries];
+
+    // 1. Immediately update UI list (no refresh needed)
+    setEntries((prev) => prev.filter((e) => e.id !== entryId));
+    if (chattingEntry?.id === entryId) setChattingEntry(null);
+    if (viewingDetailEntry?.id === entryId) setViewingDetailEntry(null);
+
     try {
+      // 2. Perform Firestore & Storage delete
       await deleteEntryFromFirestore(user.uid, entryId, attachments);
-      setEntries((prev) => prev.filter((e) => e.id !== entryId));
-      if (chattingEntry?.id === entryId) setChattingEntry(null);
-      if (viewingDetailEntry?.id === entryId) setViewingDetailEntry(null);
-    } catch (err) {
+      setDeleteSuccessToast(`"${entryTitle}" was removed.`);
+      setTimeout(() => {
+        setDeleteSuccessToast((curr) => (curr ? null : curr));
+      }, 4000);
+    } catch (err: any) {
       console.error('Delete entry failed:', err);
-      setErrorBanner('Failed to delete reflection from database.');
+      // 3. Rollback UI on failure so user does not lose their reflection
+      setEntries(previousEntries);
+      // 4. Show clear error toast with retry option (never fail silently)
+      setDeleteError({
+        entryId,
+        entryTitle,
+        attachments,
+        errorMessage:
+          err?.message || 'Database error: Could not complete deletion in Firestore.',
+      });
+    } finally {
+      setDeletingEntryId(null);
+    }
+  };
+
+  // Toggle simulate network error for testing
+  const handleToggleSimulateError = (enabled: boolean) => {
+    setSimulateNetworkError(enabled);
+    setSimulateDeleteFailure(enabled);
+  };
+
+  // Create a quick test entry to verify deletion with or without attachments
+  const handleCreateTestEntry = async (withAttachments: boolean) => {
+    if (!user?.uid) return;
+    const testId = 'test-' + Date.now();
+    const testEntry: JournalEntry = {
+      id: testId,
+      userId: user.uid,
+      title: withAttachments ? 'Test Reflection (With Media)' : 'Test Reflection (No Media)',
+      category: 'Daily Reflection',
+      mood: 'thoughtful',
+      initialText: withAttachments
+        ? 'Test reflection created to confirm that deletion properly removes documents and attached media items from Firestore without error.'
+        : 'Test reflection created to confirm that deletion immediately removes documents from Firestore and the UI list.',
+      bodyFormat: 'plain',
+      location: null,
+      attachments: withAttachments
+        ? [
+            {
+              id: 'sample-media-1',
+              name: 'mindful-scene.jpg',
+              type: 'image',
+              mimeType: 'image/jpeg',
+              url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
+              size: 102400,
+              createdAt: new Date().toISOString(),
+            },
+          ]
+        : [],
+      summary: withAttachments
+        ? 'Contains 1 media attachment for cascade deletion testing.'
+        : 'Zero media attachments.',
+      keyInsights: ['Deletion testing', 'UI optimistic update'],
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await handleSaveEntry(testEntry);
+      setDeleteSuccessToast(`Created "${testEntry.title}". You can now test deleting it.`);
+    } catch (err: any) {
+      setErrorBanner('Failed to create test reflection: ' + (err?.message || String(err)));
     }
   };
 
@@ -560,6 +665,20 @@ export default function App() {
 
                     <div className="flex items-center gap-2">
                       <button
+                        id="toggle-diagnostics-btn"
+                        onClick={() => setShowDiagnosticsPanel((prev) => !prev)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-medium cursor-pointer transition-colors shadow-2xs ${
+                          showDiagnosticsPanel
+                            ? 'bg-[#5A5A40] text-[#FAF9F5] border-[#5A5A40]'
+                            : 'bg-white border-[#D1CDBE] hover:bg-[#FAF9F5] text-[#5E5D57]'
+                        }`}
+                        title="Open Deletion Testing Tools"
+                      >
+                        <FlaskConical className="w-3.5 h-3.5 text-[#5A5A40]" />
+                        <span>Test Tools</span>
+                      </button>
+
+                      <button
                         id="open-checkins-modal-btn"
                         onClick={() => setIsHistoryModalOpen(true)}
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#D1CDBE] hover:bg-[#FAF9F5] text-xs font-medium text-[#5E5D57] cursor-pointer transition-colors shadow-2xs"
@@ -582,6 +701,63 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Deletion Test & Verification Panel */}
+                  {showDiagnosticsPanel && (
+                    <div
+                      id="deletion-diagnostics-panel"
+                      className="mb-6 p-4 rounded-2xl bg-amber-50/80 border border-amber-200/90 text-xs text-amber-950 space-y-3 animate-in fade-in duration-150"
+                    >
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <FlaskConical className="w-4 h-4 text-amber-700" />
+                          <span className="font-bold uppercase tracking-wider text-[11px] text-amber-900">
+                            Deletion Verification & Testing Suite
+                          </span>
+                        </div>
+                        <label className="inline-flex items-center gap-2 cursor-pointer font-medium select-none bg-white px-2.5 py-1 rounded-lg border border-amber-300 shadow-2xs">
+                          <input
+                            id="toggle-network-failure-sim"
+                            type="checkbox"
+                            checked={simulateNetworkError}
+                            onChange={(e) => handleToggleSimulateError(e.target.checked)}
+                            className="rounded border-amber-300 text-amber-700 focus:ring-amber-500 cursor-pointer h-4 w-4"
+                          />
+                          <span className="text-amber-950 text-xs">
+                            Simulate Network Failure:{' '}
+                            {simulateNetworkError ? (
+                              <span className="text-red-700 font-bold">ACTIVE (Deletions Will Fail)</span>
+                            ) : (
+                              <span className="text-emerald-700 font-bold">OFF (Normal Deletions)</span>
+                            )}
+                          </span>
+                        </label>
+                      </div>
+
+                      <p className="text-amber-900/90 text-xs leading-relaxed">
+                        Test deleting an entry with no attachments, deleting an entry with attachments, and simulating a network failure to confirm the error toast with retry appears reliably.
+                      </p>
+
+                      <div className="flex items-center gap-2 flex-wrap pt-1">
+                        <button
+                          id="create-test-no-att-btn"
+                          type="button"
+                          onClick={() => handleCreateTestEntry(false)}
+                          className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 hover:bg-amber-100 font-semibold text-amber-900 shadow-2xs transition-colors cursor-pointer"
+                        >
+                          + Create Test Entry (No Media)
+                        </button>
+                        <button
+                          id="create-test-with-att-btn"
+                          type="button"
+                          onClick={() => handleCreateTestEntry(true)}
+                          className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 hover:bg-amber-100 font-semibold text-amber-900 shadow-2xs transition-colors cursor-pointer"
+                        >
+                          + Create Test Entry (With Media)
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Entries Grid or Empty State */}
                   {entriesLoading ? (
@@ -627,6 +803,7 @@ export default function App() {
                           onSelect={(e) => setViewingDetailEntry(e)}
                           onOpenChat={(e) => setChattingEntry(e)}
                           onDelete={handleDeleteEntry}
+                          isDeleting={deletingEntryId === entry.id}
                         />
                       ))}
                     </div>
@@ -658,6 +835,7 @@ export default function App() {
             setViewingDetailEntry(null);
             setChattingEntry(entry);
           }}
+          onDelete={handleDeleteEntry}
         />
       )}
 
@@ -735,6 +913,79 @@ export default function App() {
           aiSettings={aiSettings}
           onSettingsUpdated={(updated) => setAISettings(updated)}
         />
+      )}
+
+      {/* Clear Delete Error Toast with Retry Action (Reliable failure feedback) */}
+      {deleteError && (
+        <div
+          id="delete-error-toast"
+          role="alert"
+          className="fixed bottom-6 right-6 z-50 max-w-md bg-white border-2 border-red-500 rounded-2xl shadow-2xl p-4 flex flex-col gap-2.5 animate-in slide-in-from-bottom-5 duration-200"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold text-red-950">
+                  Failed to Delete &ldquo;{deleteError.entryTitle}&rdquo;
+                </h4>
+                <p className="text-xs text-red-800 leading-relaxed mt-0.5">
+                  {deleteError.errorMessage}
+                </p>
+              </div>
+            </div>
+            <button
+              id="dismiss-delete-error-btn"
+              onClick={() => setDeleteError(null)}
+              className="text-stone-400 hover:text-stone-700 p-1 rounded cursor-pointer"
+              title="Dismiss error"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-1 border-t border-red-100">
+            <button
+              id="dismiss-delete-error-btn-secondary"
+              onClick={() => setDeleteError(null)}
+              className="px-2.5 py-1 text-xs font-medium text-stone-600 hover:text-stone-900 rounded-lg hover:bg-stone-100 transition-colors cursor-pointer"
+            >
+              Dismiss
+            </button>
+            <button
+              id="retry-delete-btn"
+              onClick={() => {
+                const { entryId, attachments } = deleteError;
+                setDeleteError(null);
+                handleDeleteEntry(entryId, attachments);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Delete</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Success Toast */}
+      {deleteSuccessToast && (
+        <div
+          id="delete-success-toast"
+          className="fixed bottom-6 right-6 z-50 max-w-sm bg-white border border-[#CAD5C6] rounded-2xl shadow-xl p-3.5 flex items-center justify-between gap-3 text-xs text-[#3D3C38] animate-in slide-in-from-bottom-5 duration-200"
+        >
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-[#485942]" />
+            <span className="font-medium">{deleteSuccessToast}</span>
+          </div>
+          <button
+            id="dismiss-delete-success-toast"
+            onClick={() => setDeleteSuccessToast(null)}
+            className="text-[#7C7A70] hover:text-[#3D3C38] p-1 rounded cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );

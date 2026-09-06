@@ -15,6 +15,7 @@ import {
   Film,
   ExternalLink,
   Eye,
+  Trash2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -26,16 +27,19 @@ interface EntryDetailModalProps {
   entry: JournalEntry | null;
   onClose: () => void;
   onContinueChat: (entry: JournalEntry) => void;
+  onDelete?: (entryId: string, attachments?: MediaAttachment[]) => void;
 }
 
 export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
   entry,
   onClose,
   onContinueChat,
+  onDelete,
 }) => {
   const [copied, setCopied] = useState(false);
   const [showMapModal, setShowMapModal] = useState(false);
   const [selectedAttachment, setSelectedAttachment] = useState<MediaAttachment | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
   if (!entry) return null;
 
@@ -142,6 +146,44 @@ export const EntryDetailModal: React.FC<EntryDetailModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {onDelete && (
+                isConfirmingDelete ? (
+                  <div className="flex items-center gap-1 bg-[#F9EFEF] border border-[#E8CFCF] px-2 py-1 rounded-lg">
+                    <span className="text-[11px] font-semibold text-[#8A4A4A]">Delete?</span>
+                    <button
+                      id="modal-confirm-delete-btn"
+                      type="button"
+                      onClick={() => {
+                        setIsConfirmingDelete(false);
+                        onClose();
+                        onDelete(entry.id, entry.attachments);
+                      }}
+                      className="px-2 py-0.5 bg-[#9C3838] hover:bg-[#852C2C] text-white text-[11px] font-bold rounded transition-colors cursor-pointer"
+                      title="Confirm delete"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      id="modal-cancel-delete-btn"
+                      type="button"
+                      onClick={() => setIsConfirmingDelete(false)}
+                      className="px-2 py-0.5 bg-[#EFEEE8] hover:bg-[#E5E2D9] text-[#5E5D57] text-[11px] font-medium rounded transition-colors cursor-pointer"
+                      title="Cancel"
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    id="modal-delete-reflection-btn"
+                    onClick={() => setIsConfirmingDelete(true)}
+                    title="Delete Reflection"
+                    className="p-2 rounded-lg text-[#7C7A70] hover:text-[#9C3838] hover:bg-[#F8EFEF] transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )
+              )}
               <button
                 onClick={handleCopyMarkdown}
                 title="Copy as Markdown"

@@ -323,21 +323,47 @@ export const fetchUserEntries = async (userId: string): Promise<JournalEntry[]> 
   }
 };
 
+// Optional network simulation flag for testing retry workflows
+let _simulateDeleteFailure = false;
+export const setSimulateDeleteFailure = (enable: boolean) => {
+  _simulateDeleteFailure = enable;
+};
+export const getSimulateDeleteFailure = () => _simulateDeleteFailure;
+
 // Delete a journal entry and its storage attachments
 export const deleteEntryFromFirestore = async (
   userId: string,
   entryId: string,
   attachments?: MediaAttachment[]
 ): Promise<void> => {
-  if (!userId || !entryId) return;
-  // Remove associated attachments from storage so no orphaned files exist
-  if (attachments && attachments.length > 0) {
-    for (const att of attachments) {
-      await deleteAttachmentFile(att).catch(() => {});
-    }
+  if (_simulateDeleteFailure) {
+    throw new Error('Simulated network failure: Could not reach Firestore database.');
   }
-  const entryRef = doc(db, 'users', userId, 'entries', entryId);
+
+  const currentAuthUid = auth.currentUser?.uid;
+  const effectiveUserId = userId || currentAuthUid;
+  if (!effectiveUserId) {
+    throw new Error('User authentication is missing. Please sign in to delete reflections.');
+  }
+  if (!entryId) {
+    throw new Error('Reflection ID is required to delete.');
+  }
+
+  // 1. Delete document from Cloud Firestore first to ensure database consistency
+  const entryRef = doc(db, 'users', effectiveUserId, 'entries', entryId);
   await deleteDoc(entryRef);
+
+  // 2. Best-effort concurrent deletion of associated Storage files
+  // Using Promise.allSettled ensures that a missing/inaccessible storage file never fails or blocks the delete operation
+  if (attachments && attachments.length > 0) {
+    await Promise.allSettled(
+      attachments.map((att) =>
+        deleteAttachmentFile(att).catch((storageErr) => {
+          console.warn(`Non-blocking: could not remove storage attachment ${att.id}:`, storageErr);
+        })
+      )
+    );
+  }
 };
 
 // ==========================================
